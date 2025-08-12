@@ -1,0 +1,26 @@
+# GitHub Events MCP Server Dependencies
+
+# Core MCP dependencies
+mcp[cli]>=1.4.1
+
+# HTTP client for GitHub API
+httpx>=0.28.1
+
+# Async PostgreSQL driver
+asyncpg>=0.29.0
+
+# Web framework
+fastapi>=0.104.1
+uvicorn[standard]>=0.24.0
+
+# Data validation
+pydantic>=2.5.0
+
+# Visualization
+matplotlib>=3.8.0
+
+# Environment management
+python-dotenv>=1.0.0
+
+# Additional utilities
+aiofiles>=23.2.1
