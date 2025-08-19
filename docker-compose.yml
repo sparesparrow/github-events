@@ -1,37 +1,38 @@
 version: '3.9'
 
 services:
-  postgres:
-    image: postgres:15-alpine
-    environment:
-      POSTGRES_USER: github_events_user
-      POSTGRES_PASSWORD: github_events_pass
-      POSTGRES_DB: github_events
-    ports:
-      - "5432:5432"
-    volumes:
-      - postgres_data:/var/lib/postgresql/data
-      - ./init.sql:/docker-entrypoint-initdb.d/init.sql
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U github_events_user -d github_events"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-
-  mcp-server:
+  github-events-api:
     build: .
-    environment:
-      - DATABASE_URL=postgresql://github_events_user:github_events_pass@postgres:5432/github_events
-      - GITHUB_TOKEN=${GITHUB_TOKEN}
-      - POLL_INTERVAL=30
-      - LOG_LEVEL=INFO
-    depends_on:
-      postgres:
-        condition: service_healthy
     ports:
       - "8000:8000"
+    environment:
+      - DATABASE_PATH=/app/data/github_events.db
+      - GITHUB_TOKEN=${GITHUB_TOKEN}
+      - API_HOST=0.0.0.0
+      - API_PORT=8000
+      - LOG_LEVEL=INFO
     volumes:
+      - ./data:/app/data
       - ./logs:/app/logs
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
 
-volumes:
-  postgres_data:
+  # Optional: PostgreSQL database
+  # postgres:
+  #   image: postgres:15
+  #   environment:
+  #     POSTGRES_DB: github_events
+  #     POSTGRES_USER: github_events
+  #     POSTGRES_PASSWORD: your_password_here
+  #   volumes:
+  #     - postgres_data:/var/lib/postgresql/data
+  #   ports:
+  #     - "5432:5432"
+
+# volumes:
+#   postgres_data:

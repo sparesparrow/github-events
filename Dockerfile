@@ -14,15 +14,19 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copy application code
 COPY . .
 
-# Create logs directory
-RUN mkdir -p logs
+# Create directory for database
+RUN mkdir -p /app/data
 
-# Expose port
+# Set environment variables
+ENV DATABASE_PATH=/app/data/github_events.db
+ENV PYTHONPATH=/app
+
+# Expose API port
 EXPOSE 8000
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-  CMD python -c "import asyncio; import sys; sys.exit(0)"
+  CMD python -c "import requests; requests.get('http://localhost:8000/health')" || exit 1
 
-# Run the application
-CMD ["python", "github_events_mcp_server.py"]
+# Default command (can be overridden)
+CMD ["python", "main_api.py"]

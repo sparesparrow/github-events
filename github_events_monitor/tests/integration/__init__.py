@@ -1,0 +1,1 @@
+"""GitHub Events Monitor package"""
