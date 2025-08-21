@@ -5,6 +5,8 @@ WORKDIR /app
 # Install system dependencies
 RUN apt-get update && apt-get install -y \
     gcc \
+    curl \
+    iproute2 \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy requirements and install Python dependencies
@@ -12,21 +14,27 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy application code
-COPY . .
+COPY src ./src
+COPY entrypoint.sh ./entrypoint.sh
+RUN chmod +x ./entrypoint.sh
 
 # Create directory for database
 RUN mkdir -p /app/data
 
 # Set environment variables
 ENV DATABASE_PATH=/app/data/github_events.db
-ENV PYTHONPATH=/app
+ENV PYTHONPATH=/app/src
+ENV API_HOST=0.0.0.0
+ENV API_PORT=8000
 
 # Expose API port
 EXPOSE 8000
 
-# Health check
+# Health check respects API_PORT
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-  CMD python -c "import requests; requests.get('http://localhost:8000/health')" || exit 1
+  CMD ["python", "-c", "import os,urllib.request,sys;\nport=os.getenv('API_PORT','8000');\nurl=f'http://localhost:{port}/health';\ntry:\n    r=urllib.request.urlopen(url, timeout=5);\n    sys.exit(0 if r.status==200 else 1)\nexcept Exception:\n    sys.exit(1)"]
 
-# Default command (can be overridden)
-CMD ["python", "main_api.py"]
+# Default command (can be overridden). Start REST API via entrypoint for robustness.
+CMD ["/app/entrypoint.sh"]
+
+

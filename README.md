@@ -1,493 +1,106 @@
-# GitHub Events Monitor
+# GitHub Events Monitor (Unified)
 
-A comprehensive **Python FastAPI** application with **Model Context Protocol (MCP)** integration for monitoring GitHub Events API. Tracks **WatchEvent**, **PullRequestEvent**, and **IssuesEvent** to provide real-time metrics and insights.
+A consolidated Python project that provides a FastAPI REST API and an MCP (Model Context Protocol) server for monitoring GitHub Events. This repository merges prior implementations into a single, clean `src/`-based layout with minimized duplication.
 
-## 🎯 Features
+## Features
 
-### Core Functionality
-- **GitHub Events Streaming**: Continuous polling of GitHub Events API with proper rate limiting
-- **Event Filtering**: Focuses on WatchEvent, PullRequestEvent, and IssuesEvent
-- **SQLite Storage**: Efficient local storage with optimized indices
-- **Metrics Calculation**: 
-  - Average time between pull requests for repositories
-  - Event counts by type with time-based filtering
-  - Repository activity summaries
-  - Trending repositories analysis
+- FastAPI REST API serving metrics and visualizations
+- MCP server exposing tools, resources, and prompts
+- SQLite storage with indices; optional future Postgres migration
+- Tested collector logic, endpoints, and end-to-end flows
 
-### API Endpoints
-- **REST API**: FastAPI-based endpoints with automatic OpenAPI documentation
-- **Real-time Metrics**: Get metrics via HTTP endpoints
-- **Visualization**: Bonus endpoints providing charts and graphs
-- **Health Monitoring**: Built-in health checks and status endpoints
-
-### MCP Integration  
-- **MCP Tools**: Model-controlled functions for metric calculation
-- **MCP Resources**: Application-controlled data sources
-- **MCP Prompts**: User-controlled templates for analysis
-- **Compatible**: Works with Claude Desktop, Cursor, and other MCP clients
-
-## 🏗️ Architecture
+## Project Structure
 
 ```
-GitHub Events API → [Collector] → [SQLite DB] → [Metrics Engine] → [REST API / MCP Server]
-                                      ↓
-                                [Background Tasks]
+.
+├── README.md
+├── pyproject.toml
+├── requirements.txt
+├── Dockerfile
+├── docker-compose.yml
+├── pytest.ini
+├── src/
+│   └── github_events_monitor/
+│       ├── __init__.py
+│       ├── __main__.py
+│       ├── api.py
+│       ├── collector.py
+│       ├── config.py
+│       └── mcp_server.py
+└── tests/
+    ├── integration/
+    │   └── test_integration.py
+    └── unit/
+        ├── test_api.py
+        └── test_collector.py
 ```
 
-### Components
-
-1. **GitHubEventsCollector** (`collector.py`)
-   - Handles API polling with ETag caching
-   - Manages database storage and queries  
-   - Calculates all metrics
-
-2. **FastAPI Server** (`api.py`)
-   - REST endpoints for metrics
-   - Background polling tasks
-   - Visualization endpoints
-
-3. **MCP Server** (`mcp_server.py`)
-   - Tools for metric calculation
-   - Resources for status and data
-   - Prompts for analysis workflows
-
-## 🚀 Quick Start
-
-### Prerequisites
-- Python 3.11+
-- GitHub Personal Access Token (optional but recommended)
-
-### Installation
-
-1. **Clone and setup**:
-```bash
-git clone <repository>
-cd github-events-monitor
-pip install -r requirements.txt
-```
-
-2. **Configure environment**:
-```bash
-cp .env.template .env
-# Edit .env with your GITHUB_TOKEN
-```
-
-3. **Run the API server**:
-```bash
-python main_api.py
-```
-
-4. **Access the API**:
-   - API Documentation: http://localhost:8000/docs
-   - Health Check: http://localhost:8000/health
-
-## 📊 API Usage Examples
-
-### Get Event Counts
-```bash
-curl "http://localhost:8000/metrics/event-counts?offset_minutes=60"
-```
-
-Response:
-```json
-{
-  "offset_minutes": 60,
-  "total_events": 150,
-  "counts": {
-    "WatchEvent": 75,
-    "PullRequestEvent": 45,
-    "IssuesEvent": 30
-  },
-  "timestamp": "2024-06-04T16:30:00Z"
-}
-```
-
-### Get PR Intervals
-```bash
-curl "http://localhost:8000/metrics/pr-interval?repo=microsoft/vscode"
-```
-
-Response:
-```json
-{
-  "repo_name": "microsoft/vscode",
-  "pr_count": 247,
-  "avg_interval_seconds": 3600.5,
-  "avg_interval_hours": 1.0,
-  "avg_interval_days": 0.042,
-  "median_interval_seconds": 3200.0
-}
-```
-
-### Get Repository Activity
-```bash
-curl "http://localhost:8000/metrics/repository-activity?repo=facebook/react&hours=24"
-```
-
-### Get Trending Repositories  
-```bash
-curl "http://localhost:8000/metrics/trending?hours=24&limit=10"
-```
-
-### Get Visualization (Bonus)
-```bash
-curl "http://localhost:8000/visualization/trending-chart?hours=24&format=png" -o trending.png
-```
-
-## 🔧 MCP Server Usage
-
-### Setup with Claude Desktop
-
-1. Add to your Claude Desktop config (`~/Library/Application Support/Claude/claude_desktop_config.json`):
-```json
-{
-  "mcpServers": {
-    "github-events-monitor": {
-      "command": "python",
-      "args": ["main_mcp.py"],
-      "env": {
-        "DATABASE_PATH": "github_events.db",
-        "GITHUB_TOKEN": "your_token_here"
-      }
-    }
-  }
-}
-```
-
-2. Restart Claude Desktop and look for MCP tools (🔌 icon)
-
-### Integrate with local MCP orchestration
-
-If you're using the local MCP orchestrator scripts under `~/mcp`, the GitHub Events MCP server can be started automatically from `~/mcp/start_mcp_servers.sh`.
-
-Controls via environment variables before running the script:
-
-```bash
-export GH_EVENTS_ENABLE_MCP=true     # start stdio MCP server
-export GH_EVENTS_ENABLE_API=false    # set true to also run REST API
-export GH_EVENTS_DIR=/home/sparrow/mcp/gh_events/gh_events-2  # path to this repo clone
-~/mcp/start_mcp_servers.sh
-```
-
-Logs: `~/mcp/data/logs/github_events_mcp.log` and `github_events_api.log`.
-
-### MCP Tools Available
-
-- `get_event_counts(offset_minutes)` - Get event counts by type
-- `get_avg_pr_interval(repo_name)` - Calculate PR intervals  
-- `get_repository_activity(repo_name, hours)` - Get repo activity
-- `get_trending_repositories(hours, limit)` - Get trending repos
-- `collect_events_now(limit)` - Trigger manual collection
-
-### MCP Resources Available
-
-- `github://events/status` - Server status and statistics
-- `github://events/recent/{event_type}` - Recent events by type
-
-### MCP Prompts Available
-
-- `analyze_repository_trends(repo_name)` - Generate analysis prompts
-- `create_monitoring_dashboard_config(hours)` - Dashboard setup prompts  
-- `repository_health_assessment(repo_name)` - Health assessment prompts
-
-## 🧪 Testing
-
-### Run All Tests
-```bash
-pytest
-```
-
-### Run Specific Test Categories
-```bash
-# Unit tests only
-pytest github_events_monitor/tests/unit/
-
-# Integration tests only  
-pytest github_events_monitor/tests/integration/
-
-# API tests only
-pytest -m api
-
-# MCP tests only
-pytest -m mcp
-```
-
-### Test Coverage
-```bash
-pytest --cov=github_events_monitor --cov-report=html
-```
-
-### Test Structure
-
-```
-tests/
-├── unit/
-│   ├── test_collector.py      # Core collector functionality
-│   ├── test_api.py           # FastAPI endpoints
-│   └── test_mcp_server.py    # MCP tools, resources, prompts
-└── integration/
-    └── test_integration.py    # End-to-end workflows
-```
-
-## 🔍 Test Coverage
-
-### Event Collection Tests
-- ✅ GitHub API integration with real event structure
-- ✅ Rate limiting and conditional requests (ETag/Last-Modified)
-- ✅ Event filtering (WatchEvent, PullRequestEvent, IssuesEvent)
-- ✅ Database storage and deduplication
-- ✅ Error handling (network errors, invalid JSON, etc.)
-
-### Metrics Tests
-- ✅ Average PR interval calculation
-- ✅ Event counts by type with time windows
-- ✅ Repository activity summaries
-- ✅ Trending repositories analysis
-- ✅ Edge cases (insufficient data, empty results)
-
-### API Tests  
-- ✅ All REST endpoints with various parameters
-- ✅ Response validation and error handling
-- ✅ Performance with large datasets
-- ✅ Visualization endpoints
-- ✅ Background task functionality
-
-### MCP Tests
-- ✅ All MCP tools with various inputs
-- ✅ MCP resources and data sources
-- ✅ MCP prompts and templates
-- ✅ Error handling and edge cases
-- ✅ Integration with core collector
-
-### Integration Tests
-- ✅ Complete end-to-end workflows
-- ✅ Real GitHub API structure handling
-- ✅ Database performance with 10,000+ events
-- ✅ Concurrent operations and race conditions
-
-## 📈 Performance
-
-### Benchmarks (tested with 10,000 events)
-- Event collection: < 100ms per batch
-- Event counts query: < 50ms
-- PR interval calculation: < 200ms
-- Trending repositories: < 100ms
-- Database storage: < 10ms per event
-
-### Optimizations
-- SQLite indices on key columns
-- Batch processing for bulk operations
-- ETag caching for GitHub API
-- Optional aggregation tables for high-load scenarios
-
-## 🐳 Docker Deployment
-
-### Build and Run
-```bash
-docker build -t github-events-monitor .
-docker run -p 8000:8000 -e GITHUB_TOKEN=your_token github-events-monitor
-```
-
-### Using Docker Compose
-```bash
-docker-compose up -d
-```
-
-## ☁️ Deploying to AWS
-
-### Option A: AWS Elastic Beanstalk (Docker)
-
-1. Build and push image to ECR
-```bash
-AWS_ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
-REGION=us-east-1
-REPO=github-events-monitor
-aws ecr create-repository --repository-name $REPO || true
-aws ecr get-login-password --region $REGION | docker login --username AWS --password-stdin $AWS_ACCOUNT_ID.dkr.ecr.$REGION.amazonaws.com
-docker build -t $REPO .
-docker tag $REPO:latest $AWS_ACCOUNT_ID.dkr.ecr.$REGION.amazonaws.com/$REPO:latest
-docker push $AWS_ACCOUNT_ID.dkr.ecr.$REGION.amazonaws.com/$REPO:latest
-```
-
-2. Create Elastic Beanstalk app and env (single Docker)
-```bash
-eb init -p docker github-events-monitor --region $REGION
-eb create github-events-env
-eb setenv GITHUB_TOKEN=your_token DATABASE_PATH=/data/github_events.db
-eb deploy
-```
-
-### Option B: AWS ECS Fargate
-
-1. Create ECS task and service using the ECR image above. Example task container overrides:
-```json
-{
-  "containerDefinitions": [
-    {
-      "name": "api",
-      "image": "${AWS_ACCOUNT_ID}.dkr.ecr.${REGION}.amazonaws.com/github-events-monitor:latest",
-      "portMappings": [{"containerPort": 8000, "hostPort": 8000}],
-      "environment": [
-        {"name": "GITHUB_TOKEN", "value": "your_token"},
-        {"name": "DATABASE_PATH", "value": "/data/github_events.db"}
-      ]
-    }
-  ]
-}
-```
-
-2. Expose via Application Load Balancer targeting port 8000.
-
-### Option C: AWS Lambda + API Gateway (uvicorn worker)
-
-Use a container-based Lambda with FastAPI using `mangum` adapter if needed.
-
-## 📦 Publishing
-
-Build and publish to PyPI/uv index:
-
-```bash
-uv build
-uv publish --token "$PYPI_API_TOKEN"
-```
-
-### Research notes (MCP & Postgres)
-
-- Official GitHub MCP server: GitHub is experimenting with MCP integrations; track Model Context Protocol community updates and GitHub AI features for an official server release.
-- Anthropic Postgres MCP server: Anthropic maintains an example Postgres MCP server (`mcp/postgres`) exposing SQL as MCP resources/tools; we integrate with it in `~/mcp/start_mcp_servers.sh`.
-- pgai (Timescale): `pgai` provides AI extensions for Postgres including vectorizers; see `timescale/pgai` docs and the vectorizer worker (`timescale/pgai-vectorizer-worker`). Our script starts Postgres and the optional vectorizer worker.
-
-## ⚙️ Configuration
-
-### Environment Variables
-
-| Variable | Description | Default |
-|----------|-------------|---------|
-| `GITHUB_TOKEN` | GitHub personal access token | None |
-| `DATABASE_PATH` | SQLite database file path | github_events.db |
-| `POLL_INTERVAL` | Polling interval in seconds | 300 |
-| `API_HOST` | API server host | 0.0.0.0 |
-| `API_PORT` | API server port | 8000 |
-| `LOG_LEVEL` | Logging level | INFO |
-
-### GitHub Token Setup
-
-1. Go to [GitHub Settings → Developer settings → Personal access tokens](https://github.com/settings/tokens)
-2. Generate a token with `public_repo` scope
-3. Add to `.env` file: `GITHUB_TOKEN=ghp_your_token_here`
-
-**Rate Limits**:
-- Without token: 60 requests/hour
-- With token: 5,000 requests/hour
-
-## 🔒 Security
-
-- No sensitive data is logged
-- GitHub tokens are handled securely
-- Only public GitHub data is accessed
-- Rate limiting prevents API abuse
-- Input validation on all endpoints
-
-## 📚 API Documentation
-
-### OpenAPI Documentation
-Visit http://localhost:8000/docs when the server is running for interactive API documentation.
-
-### Response Formats
-
-All API responses follow consistent formats:
-
-```json
-{
-  "success": true,
-  "data": { ... },
-  "timestamp": "2024-06-04T16:30:00Z"
-}
-```
-
-Error responses:
-```json
-{
-  "detail": "Error description",
-  "status_code": 400
-}
-```
-
-## 🤝 Development
-
-### Code Style
-```bash
-# Format code
-black .
-isort .
-
-# Lint code  
-flake8 .
-mypy .
-```
-
-### Adding New Metrics
-
-1. Add calculation method to `GitHubEventsCollector`
-2. Create API endpoint in `api.py`
-3. Add MCP tool in `mcp_server.py`
-4. Write comprehensive tests
-5. Update documentation
-
-### Contributing
-
-1. Fork the repository
-2. Create feature branch: `git checkout -b feature-name`
-3. Make changes and add tests
-4. Ensure all tests pass: `pytest`
-5. Submit pull request
-
-## 📄 License
-
-This project is licensed under the MIT License - see the LICENSE file for details.
-
-## 🙏 Acknowledgments
-
-- **GitHub** for the comprehensive Events API
-- **FastAPI** for the excellent web framework
-- **Anthropic** for the Model Context Protocol
-- **SQLite** for reliable local storage
-
----
-
-## 🚀 Advanced Usage
-
-### Custom Metrics
-
-You can easily extend the system with custom metrics:
-
-```python
-async def get_custom_metric(self, repo_name: str) -> Dict[str, Any]:
-    """Add your custom metric calculation"""
-    async with aiosqlite.connect(self.db_path) as db:
-        # Your custom SQL query here
-        cursor = await db.execute("SELECT ...")
-        # Process results and return
-```
-
-### Scaling Considerations
-
-For high-volume scenarios:
-- Use PostgreSQL instead of SQLite
-- Implement caching with Redis
-- Add load balancing for multiple instances
-- Consider event aggregation tables
-
-### Monitoring and Alerting
-
-Set up monitoring for:
-- API response times
-- Database query performance  
-- GitHub API rate limits
-- Event collection success rates
-
-Example with Grafana + Prometheus integration points are built into the health endpoints.
-
----
-
-**Built with ❤️ for the GitHub community**
+## Quick Start
+
+- Install: `pip install -r requirements.txt`
+- Run API: `python -m github_events_monitor.api`
+- Run MCP: `python -m github_events_monitor.mcp_server`
+- Env vars: `DATABASE_PATH`, `GITHUB_TOKEN`, `POLL_INTERVAL`
+
+## Docker
+
+- Build: `docker build -t github-events-monitor .`
+- Run: `docker compose up -d` (set `HOST_PORT` and `API_PORT` to avoid conflicts)
+- Port mapping examples:
+  - Default: host 8000 -> container 8000
+  - Custom: `HOST_PORT=18000 API_PORT=8080 docker compose up -d`
+  - Raw docker: `docker run -p 18000:8080 -e API_PORT=8080 github-events-monitor`
+
+## Testing
+
+- Run all: `pytest`
+- Unit only: `pytest tests/unit`
+- Integration: `pytest tests/integration`
+
+## Use Cases
+
+### Real-time repository health check
+Monitor the short-term activity and overall health of a repository when you need a quick pulse (on-call, triage, stakeholder reviews). Query event volume by type over the last N minutes/hours and see whether things are quiet or spiking. Use via REST (`GET /metrics/event-counts?offset_minutes=60`, `GET /metrics/repository-activity?repo=owner/repo&hours=24`) or MCP tools (`get_event_counts`, `get_repository_activity`) to embed this pulse check in an AI agent or dashboard.
+
+### Release readiness pulse
+Assess if a codebase is trending toward a stable release by looking at PR cadence and recent activity distribution. The average interval between PR openings, plus the distribution of Issues/PR events, gives a lightweight view of pace and churn. Use REST (`GET /metrics/pr-interval?repo=owner/repo`) or MCP (`get_avg_pr_interval`) and combine with `get_repository_activity` for a simple go/no-go signal.
+
+### Contributor velocity tracking
+Track how frequently contributors open pull requests as a proxy for development velocity. Useful for sprint retros, productivity checks, and spotting bottlenecks. Use `GET /metrics/pr-interval?repo=owner/repo` or MCP `get_avg_pr_interval` and compare over time windows (e.g., daily/weekly) to see acceleration or slowdown.
+
+### Incident and anomaly detection
+Detect sudden spikes in Issues or PRs that may indicate incidents, regressions, or flaky behavior. Poll `GET /metrics/event-counts?offset_minutes=10` (or MCP `get_event_counts`) and alert when counts cross thresholds. Pair with the trending endpoint to see which repositories are driving the spike.
+
+### Community interest signal (watch events)
+Use WatchEvent counts as a quick interest/awareness signal for marketing or devrel. Compare watch vs PR/Issues balance to separate hype from contribution. Fetch via REST (`GET /metrics/event-counts`, `GET /metrics/trending`) or MCP (`get_event_counts`, `get_trending_repositories`).
+
+### Competitive repo watchlist
+Monitor competitor or peer projects for activity surges and engagement patterns. Schedule periodic calls to `get_trending_repositories` (REST: `GET /metrics/trending?hours=24&limit=20`) and log results for longitudinal tracking; use MCP in an agent that summarizes notable changes.
+
+### Weekly trends and digest generation
+Produce a weekly digest highlighting most active repositories, PR cadence changes, and activity breakdowns. Drive it with `get_trending_repositories` and `get_repository_activity` and render visuals via `GET /visualization/trending-chart?hours=168&limit=10&format=png`. An AI agent can use the MCP prompts (`analyze_repository_trends`, `create_monitoring_dashboard_config`) to generate narrative summaries.
+
+### Analyst notebook exploration
+For data analysts, mount the database volume and query SQLite directly for custom slices. Run via Docker with `-v ./data:/app/data`, then analyze `/app/data/github_events.db` using your notebook: SELECT by `repo_name`, `event_type`, and time windows; build your own time-series. Use the REST/MCP endpoints for quick checks and the DB for custom analysis.
+
+### Agent-powered operations dashboard
+Use MCP Inspector (`mcp dev src/github_events_monitor/mcp_server.py:main -e .`) or integrate with an MCP-capable IDE/agent to expose tools like `get_event_counts`, `get_repository_activity`, and `get_trending_repositories`. Provide operators with chat-driven commands and ready-made prompts to assess repository health and decide next actions without writing queries.
+
+## Notes on the Merge
+
+- Kept the `gh_events-2` SQLite collector and API/MCP implementations as primary (well-tested, includes full test suite).
+- Dropped `gh_events-1` Postgres-specific server; if needed later, port `init.sql` and asyncpg logic behind a storage interface.
+- Consolidated packaging (pyproject), scripts, and configs into root. Removed scattered duplicates.
+
+## Known Issues / Follow-ups
+
+- Visualization endpoints are basic; consider a small frontend or richer charts.
+- MCP recent-events resource is a placeholder; add a collector method to fetch latest by type.
+- Security: never bake secrets. Use env vars for `GITHUB_TOKEN`.
+- Consider a storage abstraction to switch between SQLite and Postgres seamlessly.
+
+## License
+
+MIT
+
+
