@@ -156,21 +156,6 @@ curl "http://localhost:8000/visualization/trending-chart?hours=24&format=png" -o
 
 2. Restart Claude Desktop and look for MCP tools (🔌 icon)
 
-### Integrate with local MCP orchestration
-
-If you're using the local MCP orchestrator scripts under `~/mcp`, the GitHub Events MCP server can be started automatically from `~/mcp/start_mcp_servers.sh`.
-
-Controls via environment variables before running the script:
-
-```bash
-export GH_EVENTS_ENABLE_MCP=true     # start stdio MCP server
-export GH_EVENTS_ENABLE_API=false    # set true to also run REST API
-export GH_EVENTS_DIR=/home/sparrow/mcp/gh_events/gh_events-2  # path to this repo clone
-~/mcp/start_mcp_servers.sh
-```
-
-Logs: `~/mcp/data/logs/github_events_mcp.log` and `github_events_api.log`.
-
 ### MCP Tools Available
 
 - `get_event_counts(offset_minutes)` - Get event counts by type
@@ -292,70 +277,6 @@ docker run -p 8000:8000 -e GITHUB_TOKEN=your_token github-events-monitor
 ```bash
 docker-compose up -d
 ```
-
-## ☁️ Deploying to AWS
-
-### Option A: AWS Elastic Beanstalk (Docker)
-
-1. Build and push image to ECR
-```bash
-AWS_ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
-REGION=us-east-1
-REPO=github-events-monitor
-aws ecr create-repository --repository-name $REPO || true
-aws ecr get-login-password --region $REGION | docker login --username AWS --password-stdin $AWS_ACCOUNT_ID.dkr.ecr.$REGION.amazonaws.com
-docker build -t $REPO .
-docker tag $REPO:latest $AWS_ACCOUNT_ID.dkr.ecr.$REGION.amazonaws.com/$REPO:latest
-docker push $AWS_ACCOUNT_ID.dkr.ecr.$REGION.amazonaws.com/$REPO:latest
-```
-
-2. Create Elastic Beanstalk app and env (single Docker)
-```bash
-eb init -p docker github-events-monitor --region $REGION
-eb create github-events-env
-eb setenv GITHUB_TOKEN=your_token DATABASE_PATH=/data/github_events.db
-eb deploy
-```
-
-### Option B: AWS ECS Fargate
-
-1. Create ECS task and service using the ECR image above. Example task container overrides:
-```json
-{
-  "containerDefinitions": [
-    {
-      "name": "api",
-      "image": "${AWS_ACCOUNT_ID}.dkr.ecr.${REGION}.amazonaws.com/github-events-monitor:latest",
-      "portMappings": [{"containerPort": 8000, "hostPort": 8000}],
-      "environment": [
-        {"name": "GITHUB_TOKEN", "value": "your_token"},
-        {"name": "DATABASE_PATH", "value": "/data/github_events.db"}
-      ]
-    }
-  ]
-}
-```
-
-2. Expose via Application Load Balancer targeting port 8000.
-
-### Option C: AWS Lambda + API Gateway (uvicorn worker)
-
-Use a container-based Lambda with FastAPI using `mangum` adapter if needed.
-
-## 📦 Publishing
-
-Build and publish to PyPI/uv index:
-
-```bash
-uv build
-uv publish --token "$PYPI_API_TOKEN"
-```
-
-### Research notes (MCP & Postgres)
-
-- Official GitHub MCP server: GitHub is experimenting with MCP integrations; track Model Context Protocol community updates and GitHub AI features for an official server release.
-- Anthropic Postgres MCP server: Anthropic maintains an example Postgres MCP server (`mcp/postgres`) exposing SQL as MCP resources/tools; we integrate with it in `~/mcp/start_mcp_servers.sh`.
-- pgai (Timescale): `pgai` provides AI extensions for Postgres including vectorizers; see `timescale/pgai` docs and the vectorizer worker (`timescale/pgai-vectorizer-worker`). Our script starts Postgres and the optional vectorizer worker.
 
 ## ⚙️ Configuration
 

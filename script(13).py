@@ -1,4 +1,5 @@
-# GitHub Events Monitor
+# Create comprehensive README file
+readme_content = '''# GitHub Events Monitor
 
 A comprehensive **Python FastAPI** application with **Model Context Protocol (MCP)** integration for monitoring GitHub Events API. Tracks **WatchEvent**, **PullRequestEvent**, and **IssuesEvent** to provide real-time metrics and insights.
 
@@ -156,21 +157,6 @@ curl "http://localhost:8000/visualization/trending-chart?hours=24&format=png" -o
 
 2. Restart Claude Desktop and look for MCP tools (🔌 icon)
 
-### Integrate with local MCP orchestration
-
-If you're using the local MCP orchestrator scripts under `~/mcp`, the GitHub Events MCP server can be started automatically from `~/mcp/start_mcp_servers.sh`.
-
-Controls via environment variables before running the script:
-
-```bash
-export GH_EVENTS_ENABLE_MCP=true     # start stdio MCP server
-export GH_EVENTS_ENABLE_API=false    # set true to also run REST API
-export GH_EVENTS_DIR=/home/sparrow/mcp/gh_events/gh_events-2  # path to this repo clone
-~/mcp/start_mcp_servers.sh
-```
-
-Logs: `~/mcp/data/logs/github_events_mcp.log` and `github_events_api.log`.
-
 ### MCP Tools Available
 
 - `get_event_counts(offset_minutes)` - Get event counts by type
@@ -292,70 +278,6 @@ docker run -p 8000:8000 -e GITHUB_TOKEN=your_token github-events-monitor
 ```bash
 docker-compose up -d
 ```
-
-## ☁️ Deploying to AWS
-
-### Option A: AWS Elastic Beanstalk (Docker)
-
-1. Build and push image to ECR
-```bash
-AWS_ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
-REGION=us-east-1
-REPO=github-events-monitor
-aws ecr create-repository --repository-name $REPO || true
-aws ecr get-login-password --region $REGION | docker login --username AWS --password-stdin $AWS_ACCOUNT_ID.dkr.ecr.$REGION.amazonaws.com
-docker build -t $REPO .
-docker tag $REPO:latest $AWS_ACCOUNT_ID.dkr.ecr.$REGION.amazonaws.com/$REPO:latest
-docker push $AWS_ACCOUNT_ID.dkr.ecr.$REGION.amazonaws.com/$REPO:latest
-```
-
-2. Create Elastic Beanstalk app and env (single Docker)
-```bash
-eb init -p docker github-events-monitor --region $REGION
-eb create github-events-env
-eb setenv GITHUB_TOKEN=your_token DATABASE_PATH=/data/github_events.db
-eb deploy
-```
-
-### Option B: AWS ECS Fargate
-
-1. Create ECS task and service using the ECR image above. Example task container overrides:
-```json
-{
-  "containerDefinitions": [
-    {
-      "name": "api",
-      "image": "${AWS_ACCOUNT_ID}.dkr.ecr.${REGION}.amazonaws.com/github-events-monitor:latest",
-      "portMappings": [{"containerPort": 8000, "hostPort": 8000}],
-      "environment": [
-        {"name": "GITHUB_TOKEN", "value": "your_token"},
-        {"name": "DATABASE_PATH", "value": "/data/github_events.db"}
-      ]
-    }
-  ]
-}
-```
-
-2. Expose via Application Load Balancer targeting port 8000.
-
-### Option C: AWS Lambda + API Gateway (uvicorn worker)
-
-Use a container-based Lambda with FastAPI using `mangum` adapter if needed.
-
-## 📦 Publishing
-
-Build and publish to PyPI/uv index:
-
-```bash
-uv build
-uv publish --token "$PYPI_API_TOKEN"
-```
-
-### Research notes (MCP & Postgres)
-
-- Official GitHub MCP server: GitHub is experimenting with MCP integrations; track Model Context Protocol community updates and GitHub AI features for an official server release.
-- Anthropic Postgres MCP server: Anthropic maintains an example Postgres MCP server (`mcp/postgres`) exposing SQL as MCP resources/tools; we integrate with it in `~/mcp/start_mcp_servers.sh`.
-- pgai (Timescale): `pgai` provides AI extensions for Postgres including vectorizers; see `timescale/pgai` docs and the vectorizer worker (`timescale/pgai-vectorizer-worker`). Our script starts Postgres and the optional vectorizer worker.
 
 ## ⚙️ Configuration
 
@@ -491,3 +413,135 @@ Example with Grafana + Prometheus integration points are built into the health e
 ---
 
 **Built with ❤️ for the GitHub community**
+'''
+
+# Save README
+with open("README.md", "w") as f:
+    f.write(readme_content)
+
+print("✅ Created comprehensive README.md")
+print(f"📊 Size: {len(readme_content)} characters")
+
+# Create a simple run script
+run_script = '''#!/bin/bash
+# GitHub Events Monitor - Quick Run Script
+
+set -e
+
+echo "🚀 GitHub Events Monitor Setup and Run"
+echo "======================================"
+
+# Check Python version
+python_version=$(python3 --version 2>&1 | awk '{print $2}' | cut -d. -f1-2)
+required_version="3.11"
+
+if [ "$(printf '%s\\n' "$required_version" "$python_version" | sort -V | head -n1)" != "$required_version" ]; then
+    echo "❌ Python 3.11+ required. Found: $python_version"
+    exit 1
+fi
+
+echo "✅ Python version check passed: $python_version"
+
+# Create virtual environment if it doesn't exist
+if [ ! -d ".venv" ]; then
+    echo "📦 Creating virtual environment..."
+    python3 -m venv .venv
+fi
+
+echo "🔧 Activating virtual environment..."
+source .venv/bin/activate
+
+# Install dependencies
+echo "📚 Installing dependencies..."
+pip install --upgrade pip
+pip install -r requirements.txt
+
+# Check if .env exists
+if [ ! -f ".env" ]; then
+    echo "⚙️ Creating .env file from template..."
+    cp .env.template .env
+    echo "🔑 Please edit .env file with your GitHub token"
+    echo "   You can get a token from: https://github.com/settings/tokens"
+    echo ""
+fi
+
+# Ask user what to run
+echo "What would you like to run?"
+echo "1) FastAPI REST API server (http://localhost:8000)"
+echo "2) MCP server (for Claude Desktop integration)"  
+echo "3) Run tests"
+echo "4) Check system status"
+
+read -p "Enter your choice (1-4): " choice
+
+case $choice in
+    1)
+        echo "🌐 Starting FastAPI server..."
+        echo "📖 API docs will be available at: http://localhost:8000/docs"
+        python main_api.py
+        ;;
+    2)
+        echo "🔌 Starting MCP server..."
+        echo "💡 Use this with Claude Desktop or other MCP clients"
+        python main_mcp.py
+        ;;
+    3)
+        echo "🧪 Running tests..."
+        pytest -v
+        ;;
+    4)
+        echo "📊 System Status Check"
+        echo "====================="
+        python -c "
+import os
+from github_events_monitor.config import config
+
+print(f'Database path: {config.get_database_path()}')
+print(f'GitHub token configured: {\"Yes\" if config.github_token else \"No\"}')
+print(f'Poll interval: {config.poll_interval_seconds} seconds')
+
+if os.path.exists(config.get_database_path()):
+    import sqlite3
+    conn = sqlite3.connect(config.get_database_path())
+    cursor = conn.execute('SELECT COUNT(*) FROM events')
+    count = cursor.fetchone()[0]
+    print(f'Events in database: {count:,}')
+    conn.close()
+else:
+    print('Database: Not created yet')
+"
+        ;;
+    *)
+        echo "❌ Invalid choice. Please run the script again."
+        exit 1
+        ;;
+esac
+'''
+
+# Save run script and make executable
+with open("run.sh", "w") as f:
+    f.write(run_script)
+
+# Make executable
+import os
+os.chmod("run.sh", 0o755)
+
+print("✅ Created run.sh script (executable)")
+print("\n🎉 Complete GitHub Events Monitor implementation ready!")
+print("\nProject structure:")
+print("""
+github-events-monitor/
+├── github_events_monitor/        # Main package
+│   ├── collector.py              # Core GitHub Events collector
+│   ├── api.py                   # FastAPI REST API
+│   ├── mcp_server.py           # MCP server implementation  
+│   ├── config.py               # Configuration management
+│   └── tests/                  # Comprehensive test suite
+│       ├── unit/              # Unit tests
+│       └── integration/       # Integration tests
+├── main_api.py                 # API server entry point
+├── requirements.txt           # Python dependencies
+├── .env.template             # Environment configuration template
+├── run.sh                   # Quick start script
+└── README.md               # Complete documentation
+""")
