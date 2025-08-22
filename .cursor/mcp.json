@@ -1,0 +1,13 @@
+{
+    "mcpServers": {
+      "github-events-monitor": {
+        "command": "github-events-monitor-mcp", 
+        "args": [],
+        "env": {
+          "GITHUB_TOKEN": "${{GITHUB_TOKEN}}",
+          "MCP_TRANSPORT": "stdio"
+        }
+      }
+    }
+  }
+  

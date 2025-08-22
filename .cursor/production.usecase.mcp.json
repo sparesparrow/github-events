@@ -1,0 +1,34 @@
+{
+  "mcpServers": {
+    "github-events-monitor-production": {
+      "command": "docker",
+      "args": [
+        "run",
+        "-d",
+        "--name", "github-events-monitor-production",
+        "-p", "8000:8000",
+        "-e", "GITHUB_TOKEN=${{GITHUB_PERSONAL_ACCESS_TOKEN}}",
+        "-e", "API_PORT=8000",
+        "-e", "POLL_INTERVAL=300",
+        "-e", "LOG_LEVEL=INFO",
+        "-v", "/opt/github-events:/app/data",
+        "--restart", "unless-stopped",
+        "--memory=512m",
+        "--cpus=1.0",
+        "sparesparrow/github-events-monitor:0.2.1"
+      ],
+      "description": "Production GitHub Events Monitor with resource limits and persistent storage"
+    }
+  },
+  "monitoring": {
+    "healthCheck": {
+      "url": "http://localhost:8000/health",
+      "interval": "30s",
+      "timeout": "10s"
+    },
+    "metrics": {
+      "eventCounts": "http://localhost:8000/metrics/event-counts?offset_minutes=60",
+      "trending": "http://localhost:8000/metrics/trending?hours=24&limit=10"
+    }
+  }
+}

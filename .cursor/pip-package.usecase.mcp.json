@@ -1,0 +1,15 @@
+{
+  "mcpServers": {
+    "github-events-monitor-pip": {
+      "command": "github-events-monitor-mcp",
+      "args": [],
+      "env": {
+        "GITHUB_TOKEN": "${{GITHUB_PERSONAL_ACCESS_TOKEN}}",
+        "DATABASE_PATH": "/home/sparrow/mcp/data/github_events.db",
+        "POLL_INTERVAL": "300",
+        "MCP_TRANSPORT": "stdio"
+      },
+      "description": "GitHub Events Monitor MCP Server via pip package installation"
+    }
+  }
+}

@@ -1,0 +1,35 @@
+{
+  "mcpServers": {
+    "github-events-monitor-rest": {
+      "command": "docker",
+      "args": [
+        "run",
+        "-d",
+        "--name", "github-events-monitor-rest",
+        "-p", "8000:8000",
+        "-e", "GITHUB_TOKEN=${{GITHUB_PERSONAL_ACCESS_TOKEN}}",
+        "-e", "API_PORT=8000",
+        "-e", "POLL_INTERVAL=300",
+        "-v", "/home/sparrow/mcp/data/github-events:/app/data",
+        "--restart", "unless-stopped",
+        "sparesparrow/github-events-monitor:latest"
+      ],
+      "description": "GitHub Events Monitor REST API server via Docker"
+    }
+  },
+  "restEndpoints": {
+    "github-events-api": {
+      "baseUrl": "http://localhost:8000",
+      "endpoints": {
+        "health": "/health",
+        "event-counts": "/metrics/event-counts",
+        "pr-interval": "/metrics/pr-interval",
+        "repository-activity": "/metrics/repository-activity",
+        "trending": "/metrics/trending",
+        "visualization-chart": "/visualization/trending-chart",
+        "collect": "/collect"
+      },
+      "description": "REST API endpoints for GitHub Events Monitor"
+    }
+  }
+}

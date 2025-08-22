@@ -1,0 +1,21 @@
+{
+  "mcpServers": {
+    "github-events-monitor-docker": {
+      "command": "docker",
+      "args": [
+        "run",
+        "-i",
+        "--rm",
+        "--init",
+        "-e", "GITHUB_TOKEN=${{GITHUB_PERSONAL_ACCESS_TOKEN}}",
+        "-e", "MCP_MODE=true",
+        "-e", "DATABASE_PATH=/app/data/github_events.db",
+        "-e", "POLL_INTERVAL=300",
+        "-v", "/home/sparrow/mcp/data/github-events:/app/data",
+        "--name", "mcp-github-events-monitor-container",
+        "sparesparrow/github-events-monitor:latest"
+      ],
+      "description": "GitHub Events Monitor MCP Server via Docker container with persistent storage"
+    }
+  }
+}
