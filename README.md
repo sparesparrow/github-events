@@ -1,4 +1,4 @@
-# GitHub Events Monitor (Unified)
+# GitHub Events Monitor
 
 A consolidated Python project that provides a FastAPI REST API and an MCP (Model Context Protocol) server for monitoring GitHub Events. This repository merges prior implementations into a single, clean `src/`-based layout with minimized duplication.
 
