@@ -1,0 +1,19 @@
+{
+  "mcpServers": {
+    "github-events-monitor-dev": {
+      "command": "python",
+      "args": [
+        "-m",
+        "github_events_monitor.mcp_server"
+      ],
+      "env": {
+        "GITHUB_TOKEN": "${{GITHUB_PERSONAL_ACCESS_TOKEN}}",
+        "DATABASE_PATH": "./github_events.db",
+        "POLL_INTERVAL": "300",
+        "PYTHONPATH": "./src",
+        "MCP_TRANSPORT": "stdio"
+      },
+      "description": "GitHub Events Monitor MCP Server for development environment"
+    }
+  }
+}

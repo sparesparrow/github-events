@@ -1,0 +1,67 @@
+.env
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.pyc
+*.pkl
+*.egg-info/
+*.egg
+*.log
+
+# Environments
+.env
+.venv/
+venv/
+ENV/
+env/
+*.env
+
+# IDEs and editors
+.vscode/
+.idea/
+*.sublime-workspace
+*.sublime-project
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Test/coverage
+.coverage
+htmlcov/
+.tox/
+.cache/
+pytest_cache/
+.nox/
+
+# Build artifacts
+build/
+dist/
+*.egg-info/
+.eggs/
+pip-wheel-metadata/
+*.manifest
+
+# Database/data
+*.db
+*.sqlite3
+data/
+*.sqlite
+*.db-journal
+
+# Docker
+*.pid
+*.sock
+
+
+# Misc
+*.bak
+*.swp
+*.tmp
+
+# Node (if any frontend)
+node_modules/
+npm-debug.log
+yarn-error.log
