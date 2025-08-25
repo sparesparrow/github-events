@@ -1,0 +1,123 @@
+name: API Monitoring and Metrics Collection
+
+on:
+  schedule:
+    - cron: '0 * * * *'  # Run every hour
+  workflow_dispatch:
+    inputs:
+      duration_hours:
+        description: 'Collection duration in hours'
+        required: false
+        default: '1'
+        type: string
+
+env:
+  PYTHON_VERSION: '3.11'
+
+jobs:
+  api-monitoring:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ env.PYTHON_VERSION }}
+        cache: 'pip'
+
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+        pip install requests matplotlib seaborn
+
+    - name: Start GitHub Events Monitor
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        DATABASE_PATH: ./monitoring_github_events.db
+      run: |
+        python -m github_events_monitor.api &
+        sleep 30
+        curl -f http://localhost:8000/health
+
+    - name: Run API Monitoring Tests
+      run: |
+        python << 'PYTHON_EOF'
+        import requests
+        import json
+        import time
+        from datetime import datetime
+
+        base_url = "http://localhost:8000"
+        test_results = []
+
+        def test_endpoint(name, url, expected_status=200):
+            start_time = time.time()
+            try:
+                response = requests.get(url, timeout=30)
+                end_time = time.time()
+
+                result = {
+                    "test_name": name,
+                    "endpoint": url,
+                    "status_code": response.status_code,
+                    "response_time_ms": round((end_time - start_time) * 1000, 2),
+                    "success": response.status_code == expected_status,
+                    "timestamp": datetime.now().isoformat()
+                }
+
+                print(f"✓ {name}: {response.status_code} ({result['response_time_ms']}ms)")
+                return result
+
+            except Exception as e:
+                result = {
+                    "test_name": name,
+                    "endpoint": url,
+                    "status_code": 0,
+                    "success": False,
+                    "error": str(e),
+                    "timestamp": datetime.now().isoformat()
+                }
+                print(f"✗ {name}: ERROR - {e}")
+                return result
+
+        print("Running API monitoring tests...")
+
+        # Core endpoints
+        test_results.append(test_endpoint("Health Check", f"{base_url}/health"))
+        test_results.append(test_endpoint("Event Counts", f"{base_url}/metrics/event-counts?offset_minutes=60"))
+        test_results.append(test_endpoint("Trending Repos", f"{base_url}/metrics/trending?hours=24&limit=10"))
+        test_results.append(test_endpoint("OpenAPI Docs", f"{base_url}/docs"))
+
+        # Calculate summary
+        total_tests = len(test_results)
+        successful_tests = sum(1 for result in test_results if result["success"])
+        success_rate = (successful_tests / total_tests) * 100
+
+        summary = {
+            "total_tests": total_tests,
+            "successful_tests": successful_tests,
+            "success_rate": round(success_rate, 2),
+            "test_timestamp": datetime.now().isoformat()
+        }
+
+        # Save results
+        with open('api_monitoring_results.json', 'w') as f:
+            json.dump({
+                "summary": summary,
+                "test_results": test_results
+            }, f, indent=2)
+
+        print(f"\nMonitoring Summary:")
+        print(f"Success Rate: {success_rate:.1f}%")
+        print(f"Tests Passed: {successful_tests}/{total_tests}")
+        PYTHON_EOF
+
+    - name: Upload Monitoring Results
+      uses: actions/upload-artifact@v3
+      with:
+        name: api-monitoring-results
+        path: api_monitoring_results.json
