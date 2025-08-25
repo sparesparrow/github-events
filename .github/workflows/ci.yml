@@ -10,10 +10,16 @@ on:
 env:
   PYTHON_VERSION: '3.11'
 
+# Avoid concurrent Pages deployments colliding
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
 jobs:
   ci:
     name: Test suite
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -41,8 +47,8 @@ jobs:
     needs: ci
     if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
     runs-on: ubuntu-latest
+    timeout-minutes: 30
 
-    # Permissions needed for Pages deploy (job-level)
     permissions:
       contents: read
       pages: write
@@ -77,7 +83,6 @@ jobs:
         run: |
           python -m github_events_monitor.api > server.log 2>&1 &
           echo $! > server.pid
-          # wait until healthy (max ~3 min)
           for i in {1..36}; do
             if ! kill -0 "$(cat server.pid)" 2>/dev/null; then
               echo "❌ API process exited, last logs:" && tail -n 200 server.log && exit 1
@@ -96,8 +101,9 @@ jobs:
           BASE_URL: http://127.0.0.1:8000
         run: |
           python <<'PY'
-          import os, json, time, requests
+          import os, json, requests
           base = os.getenv("BASE_URL","http://127.0.0.1:8000")
+
           def get(ep, **params):
             try:
               r = requests.get(base+ep, params=params, timeout=30)
@@ -107,18 +113,15 @@ jobs:
 
           os.makedirs("pages_content", exist_ok=True)
 
-          # health
           s_h, d_h = get("/health")
-          # counts (10 and 60 minutes)
           out = {}
           for m in (10, 60):
             s, d = get("/metrics/event-counts", offset_minutes=m)
             out[m] = {"status": s, "data": d}
-          # trending (24h)
+
           s_t, d_t = get("/metrics/trending", hours=24, limit=10)
           repos = (d_t or {}).get("repositories") if isinstance(d_t, dict) else None
           if not repos:
-            # fallback sample so the dashboard never appears empty
             d_t = {
               "timeframe_hours": 24,
               "repositories": [
@@ -130,13 +133,11 @@ jobs:
             }
             s_t = 200
 
-          # write files used by the dashboard
           with open("pages_content/health.json","w") as f: json.dump({"status": s_h, "data": d_h}, f, indent=2)
           with open("pages_content/event_counts_10.json","w") as f: json.dump(out[10], f, indent=2)
           with open("pages_content/event_counts_60.json","w") as f: json.dump(out[60], f, indent=2)
           with open("pages_content/trending.json","w") as f: json.dump({"status": s_t, "data": d_t}, f, indent=2)
 
-          # quick diagnostics
           with open("pages_content/data_status.json","w") as f:
             json.dump({
               "base_url": base,
@@ -222,7 +223,6 @@ jobs:
             document.getElementById('updated').textContent = now();
             log({health, trending_status: trending?.status, ec10_status: ec10?.status, ec60_status: ec60?.status});
 
-            // Trending
             const repos = (trending?.data?.repositories)||[];
             if (!repos.length) {
               document.getElementById('trendMsg').innerHTML = '<em>No trending data available yet — showing sample placeholders.</em>';
@@ -245,7 +245,6 @@ jobs:
             ], {barmode:'stack',paper_bgcolor:'#111827',plot_bgcolor:'#111827',font:{color:'#e2e8f0'},margin:{t:10,l:40,r:10,b:80},xaxis:{tickangle:-30},yaxis:{title:'Events'}},
                {displayModeBar:false,responsive:true});
 
-            // Counts (10 vs 60)
             const labels = ['WatchEvent','PullRequestEvent','IssuesEvent'];
             function unpack(d){ const x=d?.data||{}; return labels.map(k=>x[k]||0); }
             const v10 = unpack(ec10); const v60 = unpack(ec60);
