@@ -23,7 +23,7 @@ jobs:
       uses: actions/checkout@v4
 
     - name: Set up Python
-      uses: actions/setup-python@v5
+      uses: actions/setup-python@v4
       with:
         python-version: ${{ env.PYTHON_VERSION }}
         cache: 'pip'
@@ -117,7 +117,7 @@ jobs:
         PYTHON_EOF
 
     - name: Upload Monitoring Results
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v3
       with:
         name: api-monitoring-results
         path: api_monitoring_results.json
