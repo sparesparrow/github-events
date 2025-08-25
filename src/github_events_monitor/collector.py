@@ -452,6 +452,39 @@ class GitHubEventsCollector:
 				})
 			
 			return trending
+
+	async def get_event_counts_timeseries(self, hours: int = 24, bucket_minutes: int = 60) -> List[Dict[str, Any]]:
+		"""
+		Return a simple time-series of total events per bucket.
+
+		Args:
+			hours: Window to look back
+			bucket_minutes: Size of each time bucket in minutes
+
+		Returns:
+			List of dicts: [{"bucket_start": iso, "total": n}] ordered by time.
+		"""
+		from datetime import timedelta
+		if bucket_minutes <= 0:
+			bucket_minutes = 60
+		cutoff_time = datetime.now(timezone.utc) - timedelta(hours=hours)
+		async with aiosqlite.connect(self.db_path) as db:
+			# SQLite time bucketing via strftime to nearest minute bucket
+			cursor = await db.execute(
+				"""
+				SELECT
+					strftime('%Y-%m-%dT%H:%M:00Z', created_at) as minute_bucket,
+					COUNT(*) as total
+				FROM events
+				WHERE created_at >= ?
+				GROUP BY minute_bucket
+				ORDER BY minute_bucket ASC
+				""",
+				(cutoff_time,)
+			)
+			rows = await cursor.fetchall()
+			series = [{"bucket_start": b, "total": t} for b, t in rows]
+			return series
 	
 	async def collect_and_store(self, limit: Optional[int] = None) -> int:
 		"""

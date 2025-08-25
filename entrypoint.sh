@@ -4,6 +4,7 @@
 # This script starts the appropriate service based on environment variables
 
 set -e
+set -u
 
 echo "🚀 Starting GitHub Events Monitor..."
 
@@ -12,6 +13,11 @@ API_HOST=${API_HOST:-"0.0.0.0"}
 API_PORT=${API_PORT:-"8000"}
 DATABASE_PATH=${DATABASE_PATH:-"/app/data/github_events.db"}
 POLL_INTERVAL=${POLL_INTERVAL:-"300"}
+
+if [ -z "${DATABASE_PATH:-}" ]; then
+    echo "DATABASE_PATH is not set" >&2
+    exit 1
+fi
 
 # Ensure database directory exists
 mkdir -p "$(dirname "$DATABASE_PATH")"

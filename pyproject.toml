@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "github-events-monitor"
-version = "0.2.3"
+version = "1.0.0"
 description = "GitHub Events Monitor with FastAPI and MCP server"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -69,6 +69,21 @@ markers = [
   "api: API tests",
   "mcp: MCP tests",
 ]
+
+[tool.flake8]
+max-line-length = 100
+extend-ignore = ["E203", "W503"]
+exclude = [".venv", "build", "dist", "docs", "pages_content", "site"]
+
+[tool.mypy]
+python_version = "3.11"
+warn_unused_configs = true
+warn_redundant_casts = true
+warn_unused_ignores = true
+disallow_untyped_defs = true
+no_implicit_optional = true
+show_error_codes = true
+exclude = "(\\.venv|build|dist|tests/)"
 
 [tool.uv.sources]
 github-events-monitor = { workspace = true }

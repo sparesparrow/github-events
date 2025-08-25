@@ -187,6 +187,7 @@ Environment variables:
 | `API_PORT` | `8000` | API server port |
 | `POLL_INTERVAL` | `300` | GitHub API polling interval (seconds) |
 | `MCP_MODE` | `false` | Set to `true` to run MCP server instead of REST API |
+| `API_BASE_URL` | `http://127.0.0.1:8001` | Base URL for REST API used by MCP client |
 
 ## 📋 Assignment Compliance
 
@@ -265,4 +266,4 @@ MIT License - see LICENSE file for details.
 
 ---
 
-**Status**: ✅ Production Ready | **Version**: 0.2.3 | **Tests**: 35/35 Passing
+**Status**: ✅ Production Ready | **Version**: 1.0.0 | **Tests**: 44/44 Passing

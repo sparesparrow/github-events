@@ -1,9 +1,8 @@
-FROM python:3.11-slim
+FROM python:3.11-slim AS base
 
 WORKDIR /app
 
-# Install system dependencies
-RUN apt-get update && apt-get install -y \
+RUN apt-get update && apt-get install -y --no-install-recommends \
     gcc \
     curl \
     iproute2 \
@@ -35,6 +34,7 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
   CMD ["python", "-c", "import os,urllib.request,sys;\nport=os.getenv('API_PORT','8000');\nurl=f'http://localhost:{port}/health';\ntry:\n    r=urllib.request.urlopen(url, timeout=5);\n    sys.exit(0 if r.status==200 else 1)\nexcept Exception:\n    sys.exit(1)"]
 
 # Default command (can be overridden). Start REST API via entrypoint for robustness.
+USER 1000:1000
 CMD ["/app/entrypoint.sh"]
 
 

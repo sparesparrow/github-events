@@ -366,6 +366,7 @@ async def get_mcp_capabilities():
 		{"name": "get_repository_activity", "description": _get_doc(mcp_mod.get_repository_activity)},
 		{"name": "get_trending_repositories", "description": _get_doc(mcp_mod.get_trending_repositories)},
 		{"name": "collect_events_now", "description": _get_doc(mcp_mod.collect_events_now)},
+		{"name": "get_health", "description": _get_doc(mcp_mod.get_health)},
 	]
 	resources = [
 		{"uri": "github://events/status", "name": "server_status", "description": _get_doc(mcp_mod.server_status)},

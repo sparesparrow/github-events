@@ -1,4 +1,11 @@
 {
+    "schemaVersion": "1.0",
+    "version": "1.0.0",
+    "metadata": {
+      "project": "github-events-monitor",
+      "description": "MCP server configurations for GitHub Events Monitor",
+      "updated": "2025-08-26"
+    },
     "mcpServers": {
       "github-events-monitor": {
         "command": "github-events-monitor-mcp", 
@@ -7,7 +14,8 @@
           "GITHUB_TOKEN": "${{GITHUB_TOKEN}}",
           "MCP_TRANSPORT": "stdio",
           "DATABASE_PATH": "/home/sparrow/mcp/github-events-clone/github_events.db",
-          "POLL_INTERVAL": "300"
+          "POLL_INTERVAL": "300",
+          "API_BASE_URL": "http://127.0.0.1:8001"
         },
         "description": "GitHub Events Monitor MCP Server via uv package installation"
       },
@@ -18,7 +26,8 @@
           "GITHUB_TOKEN": "${{GITHUB_TOKEN}}",
           "DATABASE_PATH": "/home/sparrow/mcp/github-events-clone/github_events.db",
           "POLL_INTERVAL": "300",
-          "MCP_TRANSPORT": "stdio"
+          "MCP_TRANSPORT": "stdio",
+          "API_BASE_URL": "http://127.0.0.1:8001"
         },
         "description": "GitHub Events Monitor MCP Server via pip package installation"
       },
@@ -33,9 +42,10 @@
           "-e", "MCP_MODE=true",
           "-e", "DATABASE_PATH=/app/data/github_events.db",
           "-e", "POLL_INTERVAL=300",
+          "-e", "API_BASE_URL=http://host.docker.internal:8001",
           "-v", "/home/sparrow/mcp/data/github-events:/app/data",
           "--name", "mcp-github-events-monitor-container",
-          "sparesparrow/github-events-monitor:0.2.2"
+          "sparesparrow/github-events-monitor:1.0.0"
         ],
         "description": "GitHub Events Monitor MCP Server via Docker container with persistent storage"
       },
@@ -51,7 +61,7 @@
           "-e", "POLL_INTERVAL=300",
           "-v", "/home/sparrow/mcp/data/github-events:/app/data",
           "--restart", "unless-stopped",
-          "sparesparrow/github-events-monitor:0.2.2"
+          "sparesparrow/github-events-monitor:1.0.0"
         ],
         "description": "GitHub Events Monitor REST API server via Docker"
       },
@@ -70,7 +80,7 @@
         "--restart", "unless-stopped",
         "--memory=512m",
         "--cpus=1.0",
-        "sparesparrow/github-events-monitor:0.2.2"
+        "sparesparrow/github-events-monitor:1.0.0"
       ],
       "description": "Production GitHub Events Monitor with resource limits and persistent storage"
     }

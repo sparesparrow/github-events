@@ -34,12 +34,21 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt || true
           pip install -e .
+          pip install flake8 mypy
 
       - name: Run tests
         env:
           PYTHONPATH: ${{ github.workspace }}/src
         run: |
           pytest -q --tb=short || echo "Tests completed"
+
+      - name: Lint (flake8)
+        run: |
+          flake8 src || true
+
+      - name: Type check (mypy)
+        run: |
+          mypy src || true
 
   pages:
     name: Build data and publish Pages dashboard

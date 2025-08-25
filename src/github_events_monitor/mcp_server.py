@@ -208,6 +208,24 @@ async def collect_events_now(limit: Optional[int] = None) -> Dict[str, Any]:
 	except Exception as e:
 		return {"error": str(e), "success": False}
 
+@mcp.tool()
+async def get_health() -> Dict[str, Any]:
+	"""
+	Get REST API health status and basic connectivity check.
+
+	Returns:
+		dict with service status and timestamp.
+	"""
+	if not http_client:
+		return {"error": "HTTP client not initialized", "success": False}
+	try:
+		resp = await http_client.get("/health")
+		resp.raise_for_status()
+		data = resp.json()
+		return {"success": True, "health": data}
+	except Exception as e:
+		return {"success": False, "error": str(e)}
+
 # MCP Resources - Application-controlled data sources
 
 @mcp.resource("github://events/status")

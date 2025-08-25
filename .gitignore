@@ -43,6 +43,9 @@ dist/
 .eggs/
 pip-wheel-metadata/
 *.manifest
+site/
+pages_content/
+server.log
 
 # Database/data
 *.db

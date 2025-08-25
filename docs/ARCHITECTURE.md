@@ -78,14 +78,14 @@ C4Context
 ```sql
 CREATE TABLE events (
     id TEXT PRIMARY KEY,
-    type TEXT NOT NULL,
+    event_type TEXT NOT NULL,
     repo_name TEXT,
     created_at TEXT NOT NULL,
     actor_login TEXT,
     payload TEXT
 );
 
-CREATE INDEX idx_events_type_created ON events(type, created_at);
+CREATE INDEX idx_events_type_created ON events(event_type, created_at);
 CREATE INDEX idx_events_repo_created ON events(repo_name, created_at);
 CREATE INDEX idx_events_created ON events(created_at);
 ```
