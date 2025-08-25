@@ -11,20 +11,22 @@ import os
 from datetime import datetime, timezone
 from typing import Dict, List, Optional, Any
 
+import httpx
+
 from mcp.server.fastmcp import FastMCP
 from mcp.server import Server
 from mcp.types import Resource, Tool, TextContent, ImageContent
 
-from .collector import GitHubEventsCollector
-
-# Configuration
-DATABASE_PATH = os.getenv("DATABASE_PATH", "github_events.db")
+"""Client configuration: talk to REST API instead of local collector"""
+DATABASE_PATH = os.getenv("DATABASE_PATH", "github_events.db")  # For status display only
 GITHUB_TOKEN = os.getenv("GITHUB_TOKEN")
-POLL_INTERVAL = int(os.getenv("POLL_INTERVAL", "300"))  # 5 minutes
+POLL_INTERVAL = int(os.getenv("POLL_INTERVAL", "300"))  # Unused in client mode
+MCP_TRANSPORT = os.getenv("MCP_TRANSPORT", "stdio")
+API_BASE_URL = os.getenv("API_BASE_URL", os.getenv("MCP_API_BASE_URL", "http://127.0.0.1:8001"))
 
-# Global collector instance
-collector: Optional[GitHubEventsCollector] = None
-background_task: Optional[asyncio.Task] = None
+# HTTP client state
+http_client: Optional[httpx.AsyncClient] = None
+last_health: Optional[Dict[str, Any]] = None
 
 # Initialize MCP server
 mcp = FastMCP(
@@ -33,37 +35,28 @@ mcp = FastMCP(
 )
 
 async def initialize_collector():
-	"""Initialize the collector and start background polling"""
-	global collector, background_task
+	"""Initialize HTTP client and verify API health (client mode)."""
+	global http_client, last_health
 	
-	collector = GitHubEventsCollector(DATABASE_PATH, GITHUB_TOKEN)
-	await collector.initialize_database()
-	
-	# Start background polling task
-	background_task = asyncio.create_task(background_poller())
+	http_client = httpx.AsyncClient(base_url=API_BASE_URL, timeout=30)
+	try:
+		resp = await http_client.get("/health")
+		resp.raise_for_status()
+		last_health = resp.json()
+	except Exception as e:
+		# Keep running; tools will surface errors on demand
+		last_health = {"status": "error", "message": str(e), "api_base_url": API_BASE_URL}
 
 async def cleanup():
 	"""Cleanup resources"""
-	global background_task
-	
-	if background_task:
-		background_task.cancel()
-		try:
-			await background_task
-		except asyncio.CancelledError:
-			pass
+	global http_client
+	if http_client:
+		await http_client.aclose()
+		http_client = None
 
 async def background_poller():
-	"""Background task to continuously poll GitHub Events API"""
-	while True:
-		try:
-			if collector:
-				count = await collector.collect_and_store()
-				if count > 0:
-					print(f"Background poll: collected {count} events")
-		except Exception as e:
-			print(f"Background polling error: {e}")
-		
+	"""Deprecated in client mode: no-op."""
+	while False:
 		await asyncio.sleep(POLL_INTERVAL)
 
 # MCP Tools - Model-controlled functions
@@ -79,22 +72,21 @@ async def get_event_counts(offset_minutes: int) -> Dict[str, Any]:
 	Returns:
 		Dictionary containing event counts by type and metadata
 	"""
-	if not collector:
-		return {"error": "Collector not initialized"}
-	
+	if not http_client:
+		return {"error": "HTTP client not initialized"}
 	try:
 		if offset_minutes <= 0:
 			return {"error": "offset_minutes must be positive"}
-		
-		counts = await collector.get_event_counts_by_type(offset_minutes)
-		total_events = sum(counts.values())
-		
+		resp = await http_client.get("/metrics/event-counts", params={"offset_minutes": offset_minutes})
+		resp.raise_for_status()
+		data = resp.json()
+		# ensure schema
 		return {
-			"offset_minutes": offset_minutes,
-			"total_events": total_events,
-			"counts": counts,
-			"timestamp": datetime.now(timezone.utc).isoformat(),
-			"success": True
+			"offset_minutes": data.get("offset_minutes", offset_minutes),
+			"total_events": data.get("total_events", 0),
+			"counts": data.get("counts", {}),
+			"timestamp": data.get("timestamp", datetime.now(timezone.utc).isoformat()),
+			"success": True,
 		}
 	except Exception as e:
 		return {"error": str(e), "success": False}
@@ -110,29 +102,21 @@ async def get_avg_pr_interval(repo_name: str) -> Dict[str, Any]:
 	Returns:
 		Dictionary containing PR interval statistics or error information
 	"""
-	if not collector:
-		return {"error": "Collector not initialized"}
-	
+	if not http_client:
+		return {"error": "HTTP client not initialized"}
 	try:
-		result = await collector.get_avg_pr_interval(repo_name)
-		
-		if result is None:
-			return {
-				"repo_name": repo_name,
-				"pr_count": 0,
-				"message": "Insufficient data - need at least 2 PR 'opened' events",
-				"success": True
-			}
-		
-		# Add human-readable interpretations
+		resp = await http_client.get("/metrics/pr-interval", params={"repo": repo_name})
+		resp.raise_for_status()
+		result = resp.json() or {}
+		# Normalize and enrich
+		pr_count = int(result.get("pr_count", 0))
+		avg_hours = result.get("avg_interval_hours") or 0
 		result["success"] = True
 		result["interpretation"] = {
-			"frequency_description": _interpret_pr_frequency(result.get("avg_interval_hours", 0)),
-			"activity_level": _interpret_activity_level(result.get("pr_count", 0))
+			"frequency_description": _interpret_pr_frequency(avg_hours if isinstance(avg_hours, (int, float)) else 0),
+			"activity_level": _interpret_activity_level(pr_count),
 		}
-		
 		return result
-		
 	except Exception as e:
 		return {"error": str(e), "success": False}
 
@@ -148,23 +132,23 @@ async def get_repository_activity(repo_name: str, hours: int = 24) -> Dict[str, 
 	Returns:
 		Dictionary containing detailed repository activity information
 	"""
-	if not collector:
-		return {"error": "Collector not initialized"}
-	
+	if not http_client:
+		return {"error": "HTTP client not initialized"}
 	try:
-		result = await collector.get_repository_activity_summary(repo_name, hours)
+		resp = await http_client.get(
+			"/metrics/repository-activity",
+			params={"repo": repo_name, "hours": hours},
+		)
+		resp.raise_for_status()
+		result = resp.json() or {}
 		result["success"] = True
-		
-		# Add insights
-		total_events = result.get("total_events", 0)
+		total_events = result.get("total_events", 0) or 0
 		result["insights"] = {
-			"activity_rate_per_hour": total_events / hours,
+			"activity_rate_per_hour": (total_events / hours) if hours else 0,
 			"most_common_event": _get_most_common_event(result.get("activity", {})),
-			"activity_assessment": _assess_activity_level(total_events, hours)
+			"activity_assessment": _assess_activity_level(int(total_events), int(hours or 1)),
 		}
-		
 		return result
-		
 	except Exception as e:
 		return {"error": str(e), "success": False}
 
@@ -180,21 +164,21 @@ async def get_trending_repositories(hours: int = 24, limit: int = 10) -> Dict[st
 	Returns:
 		Dictionary containing trending repositories data
 	"""
-	if not collector:
-		return {"error": "Collector not initialized"}
-	
+	if not http_client:
+		return {"error": "HTTP client not initialized"}
 	try:
-		trending_data = await collector.get_trending_repositories(hours, limit)
-		
+		resp = await http_client.get("/metrics/trending", params={"hours": hours, "limit": limit})
+		resp.raise_for_status()
+		data = resp.json() or {}
+		repos = data.get("repositories", [])
 		return {
-			"hours": hours,
+			"hours": data.get("hours", hours),
 			"limit": limit,
-			"repositories": trending_data,
-			"total_found": len(trending_data),
-			"timestamp": datetime.now(timezone.utc).isoformat(),
-			"success": True
+			"repositories": repos,
+			"total_found": len(repos),
+			"timestamp": data.get("timestamp", datetime.now(timezone.utc).isoformat()),
+			"success": True,
 		}
-		
 	except Exception as e:
 		return {"error": str(e), "success": False}
 
@@ -209,19 +193,18 @@ async def collect_events_now(limit: Optional[int] = None) -> Dict[str, Any]:
 	Returns:
 		Dictionary containing collection results
 	"""
-	if not collector:
-		return {"error": "Collector not initialized"}
-	
+	if not http_client:
+		return {"error": "HTTP client not initialized"}
 	try:
-		count = await collector.collect_and_store(limit)
-		
+		resp = await http_client.post("/collect", params=({"limit": limit} if limit is not None else {}))
+		resp.raise_for_status()
+		data = resp.json() or {}
 		return {
-			"events_collected": count,
-			"limit": limit,
+			"message": data.get("message", "Collection started"),
+			"limit": data.get("limit", limit),
 			"timestamp": datetime.now(timezone.utc).isoformat(),
-			"success": True
+			"success": True,
 		}
-		
 	except Exception as e:
 		return {"error": str(e), "success": False}
 
@@ -229,32 +212,15 @@ async def collect_events_now(limit: Optional[int] = None) -> Dict[str, Any]:
 
 @mcp.resource("github://events/status")
 async def server_status() -> str:
-	"""Provides current status of the GitHub Events monitoring server"""
-	if not collector:
-		return json.dumps({
-			"status": "error",
-			"message": "Collector not initialized"
-		})
-	
+	"""Return REST API health status for GitHub Events monitor."""
+	if not http_client:
+		return json.dumps({"status": "error", "message": "HTTP client not initialized"})
 	try:
-		# Get basic statistics from database
-		# This would require adding a method to collector for overall stats
-		status = {
-			"status": "running",
-			"database_path": DATABASE_PATH,
-			"github_token_configured": bool(GITHUB_TOKEN),
-			"poll_interval_seconds": POLL_INTERVAL,
-			"last_updated": datetime.now(timezone.utc).isoformat(),
-			"monitored_events": list(collector.MONITORED_EVENTS)
-		}
-		
-		return json.dumps(status, indent=2)
-		
+		resp = await http_client.get("/health")
+		resp.raise_for_status()
+		return json.dumps(resp.json(), indent=2)
 	except Exception as e:
-		return json.dumps({
-			"status": "error",
-			"message": str(e)
-		})
+		return json.dumps({"status": "error", "message": str(e), "api_base_url": API_BASE_URL})
 
 @mcp.resource("github://events/recent/{event_type}")
 async def recent_events_by_type(event_type: str) -> str:
@@ -264,26 +230,18 @@ async def recent_events_by_type(event_type: str) -> str:
 	Args:
 		event_type: Type of events to retrieve (WatchEvent, PullRequestEvent, IssuesEvent)
 	"""
-	if not collector:
-		return json.dumps({"error": "Collector not initialized"})
-	
-	valid_types = collector.MONITORED_EVENTS
+	valid_types = {"WatchEvent", "PullRequestEvent", "IssuesEvent"}
 	if event_type not in valid_types:
-		return json.dumps({
-			"error": f"Invalid event type. Must be one of: {valid_types}"
-		})
-	
+		return json.dumps({"error": f"Invalid event type. Must be one of: {sorted(valid_types)}"})
 	try:
-		# This would require adding a method to get recent events by type
-		# For now, return a placeholder
+		# No direct REST endpoint yet; provide guidance
 		result = {
 			"event_type": event_type,
-			"message": f"Recent {event_type} events",
-			"timestamp": datetime.now(timezone.utc).isoformat()
+			"message": f"Recent {event_type} listing not available via REST API",
+			"hint": "Consider adding /events/{event_type} endpoint to the API",
+			"timestamp": datetime.now(timezone.utc).isoformat(),
 		}
-		
 		return json.dumps(result, indent=2)
-		
 	except Exception as e:
 		return json.dumps({"error": str(e)})
 
@@ -517,14 +475,15 @@ def _assess_activity_level(total_events: int, hours: int) -> str:
 
 # Server lifecycle management
 async def main():
-	"""Main function to run the MCP server"""
-	try:
-		await initialize_collector()
-		# Run the MCP server
-		await mcp.run(transport="stdio")
-	finally:
-		await cleanup()
-
+    """Main function to run the MCP server"""
+    try:
+        await initialize_collector()
+        # Run the MCP server (avoid nested event loops by using the async stdio runner)
+        if MCP_TRANSPORT.lower() != "stdio":
+            raise ValueError(f"Unsupported MCP_TRANSPORT: {MCP_TRANSPORT}. Only 'stdio' is supported.")
+        await mcp.run_stdio_async()
+    finally:
+        await cleanup()
 if __name__ == "__main__":
 	asyncio.run(main())
 

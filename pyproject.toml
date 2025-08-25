@@ -4,11 +4,11 @@ build-backend = "hatchling.build"
 
 [project]
 name = "github-events-monitor"
-version = "0.2.1"
+version = "0.2.3"
 description = "GitHub Events Monitor with FastAPI and MCP server"
 readme = "README.md"
 requires-python = ">=3.11"
-authors = [{ name = "Your Name", email = "you@example.com" }]
+authors = [{ name = "sparesparrow", email = "sparesparrow@protonmail.ch" }]
 license = { text = "MIT" }
 keywords = ["github", "events", "fastapi", "mcp", "monitoring"]
 classifiers = [
@@ -68,4 +68,12 @@ markers = [
   "slow: Slow tests",
   "api: API tests",
   "mcp: MCP tests",
+]
+
+[tool.uv.sources]
+github-events-monitor = { workspace = true }
+
+[dependency-groups]
+dev = [
+    "github-events-monitor",
 ]

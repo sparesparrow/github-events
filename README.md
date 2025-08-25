@@ -12,13 +12,51 @@ A production-ready Python application that monitors GitHub Events API and provid
 
 ## 🚀 Quick Start
 
+### Setup with uv
+
+```bash
+uv sync
+```
+
+### Setup with pip
+
+```bash
+pip install -r requirements.txt
+```
+
+### Setup with poetry
+
+```bash
+poetry install
+```
+
+### Run the application
+
+```bash
+uv run github-events-monitor-api
+# or
+python -m github_events_monitor.api
+```
+
+### Run the MCP server
+
+```bash
+uv run github-events-monitor-mcp
+# or
+python -m github_events_monitor.mcp_server
+```
+
+### Run the tests
+
+```bash
+uv run pytest
+# or
+pytest
+```
+
 ### Local Development
 
 ```bash
-# Install dependencies
-pip install -r requirements.txt
-
-# Configure environment (copy .env.template to .env)
 export GITHUB_TOKEN=your_github_token_here
 
 # Run REST API server
@@ -227,4 +265,4 @@ MIT License - see LICENSE file for details.
 
 ---
 
-**Status**: ✅ Production Ready | **Version**: 0.2.1 | **Tests**: 35/35 Passing
+**Status**: ✅ Production Ready | **Version**: 0.2.3 | **Tests**: 35/35 Passing

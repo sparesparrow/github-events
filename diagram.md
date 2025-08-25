@@ -30,3 +30,73 @@ C4Context
 - **GitHub API**: Source of raw event data.
 
 This is a Level 1 (System Context) diagram, focusing on the system as a black box and its interactions.
+
+# C4 Model - Level 2: Container Diagram
+
+```mermaid
+C4Container
+    title Container Diagram for GitHub Events Monitor
+
+    System(api, "GitHub Events Monitor", "Python application that collects events, computes metrics, and serves API/visualizations")
+
+    System_Ext(github, "GitHub API", "External service providing public events stream")
+```
+
+# C4 Model - Level 3: Component Diagram
+
+```mermaid
+C4Component
+    title Component Diagram for GitHub Events Monitor
+
+    System(api, "GitHub Events Monitor", "Python application that collects events, computes metrics, and serves API/visualizations")
+```
+
+# C4 Model - Level 4: Dynamic Diagram
+
+```mermaid
+C4Dynamic
+    title Dynamic Diagram for GitHub Events Monitor
+
+    System(api, "GitHub Events Monitor", "Python application that collects events, computes metrics, and serves API/visualizations")
+```
+
+
+# C4 Model - Level 5: Deployment Diagram
+
+```mermaid
+C4Deployment
+    title Deployment Diagram for GitHub Events Monitor
+
+    System(api, "GitHub Events Monitor", "Python application that collects events, computes metrics, and serves API/visualizations")
+```
+
+# C4 Model - Level 6: Code Diagram
+
+```mermaid
+C4Code
+    title Code Diagram for GitHub Events Monitor
+
+    System(api, "GitHub Events Monitor", "Python application that collects events, computes metrics, and serves API/visualizations")
+```
+
+
+# C4 Model - Level 7: Context Diagram
+
+```mermaid
+C4Context
+    title Context Diagram for GitHub Events Monitor
+
+    System(api, "GitHub Events Monitor", "Python application that collects events, computes metrics, and serves API/visualizations")
+```
+
+# C4 Model - Level 8: System Landscape Diagram
+
+```mermaid
+C4SystemLandscape
+    title System Landscape Diagram for GitHub Events Monitor
+
+    System(api, "GitHub Events Monitor", "Python application that collects events, computes metrics, and serves API/visualizations")
+```
+
+
+
