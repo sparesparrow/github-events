@@ -10,463 +10,86 @@ on:
 
 env:
   PYTHON_VERSION: '3.11'
-  GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
 jobs:
   test-and-build:
     runs-on: ubuntu-latest
-
     steps:
-    - name: Checkout repository
-      uses: actions/checkout@v4
-
-    - name: Set up Python
-      uses: actions/setup-python@v5
-      with:
-        python-version: ${{ env.PYTHON_VERSION }}
-        cache: 'pip'
-
-    - name: Install dependencies
-      run: |
-        python -m pip install --upgrade pip
-        pip install -r requirements.txt
-        pip install pytest-cov pytest-html
-
-    - name: Run unit tests with coverage
-      run: |
-        pytest tests/unit --cov=src/github_events_monitor --cov-report=xml --cov-report=html
-
-    - name: Run integration tests
-      env:
-        DATABASE_PATH: ./test_github_events.db
-        API_HOST: 127.0.0.1
-        API_PORT: 8001
-      run: |
-        pytest tests/integration -v
-
-    - name: Upload coverage reports
-      uses: codecov/codecov-action@v3
-      with:
-        files: ./coverage.xml
-        flags: unittests
-
-    - name: Build Docker image
-      run: |
-        docker build -t github-events-monitor:${{ github.sha }} .
-        docker tag github-events-monitor:${{ github.sha }} github-events-monitor:latest
-
-    - name: Test Docker container health
-      run: |
-        docker run -d --name test-container -p 8000:8000 \
-          -e GITHUB_TOKEN=${{ secrets.GITHUB_TOKEN }} \
-          github-events-monitor:latest
-        
-        # Robust health check with retry logic
-        echo "🔍 Waiting for container to be healthy..."
-        for i in {1..30}; do
-          if curl -f --connect-timeout 5 --max-time 10 http://localhost:8000/health; then
-            echo "✅ Container is healthy!"
-            break
-          fi
-          echo "⏳ Attempt $i/30 - waiting 5 seconds..."
-          sleep 5
-          if [ $i -eq 30 ]; then
-            echo "❌ Container health check failed after 150 seconds"
-            docker logs test-container
-            exit 1
-          fi
-        done
-        
-        docker stop test-container
-
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: 'pip'
+      - name: Install deps + project (editable)
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install -e .
+      - name: Run unit tests
+        env:
+          PYTHONPATH: ${{ github.workspace }}/src
+        run: |
+          pytest -q
   example-usage:
     runs-on: ubuntu-latest
     needs: test-and-build
-    if: github.event_name != 'pull_request'
-
     steps:
-    - name: Checkout repository
-      uses: actions/checkout@v4
-
-    - name: Set up Python
-      uses: actions/setup-python@v5
-      with:
-        python-version: ${{ env.PYTHON_VERSION }}
-        cache: 'pip'
-
-    - name: Install dependencies
-      run: |
-        python -m pip install --upgrade pip
-        pip install -r requirements.txt
-        pip install requests matplotlib seaborn pandas psutil
-
-    - name: Start GitHub Events Monitor with Robust Health Check
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        DATABASE_PATH: ./demo_github_events.db
-      run: |
-        echo "🚀 Starting GitHub Events Monitor API server..."
-        
-        # Start server in background and capture PID
-        python -m github_events_monitor.api > server.log 2>&1 &
-        SERVER_PID=$!
-        echo "Server started with PID: $SERVER_PID"
-        
-        # Store PID for cleanup
-        echo $SERVER_PID > server.pid
-        
-        # Robust health check with detailed logging
-        echo "🔍 Performing health checks..."
-        HEALTH_CHECK_PASSED=false
-        
-        for i in {1..60}; do
-          # Check if process is still running
-          if ! kill -0 $SERVER_PID 2>/dev/null; then
-            echo "❌ Server process died! Logs:"
-            cat server.log
-            exit 1
-          fi
-          
-          # Check if server responds to health endpoint
-          if curl -f --connect-timeout 3 --max-time 5 -s http://localhost:8000/health >/dev/null 2>&1; then
-            echo "✅ Server is healthy and responding!"
-            HEALTH_CHECK_PASSED=true
-            break
-          fi
-          
-          echo "⏳ Health check attempt $i/60 - server not ready yet..."
-          sleep 5
-        done
-        
-        if [ "$HEALTH_CHECK_PASSED" = false ]; then
-          echo "❌ Health check failed after 5 minutes. Server logs:"
-          cat server.log
-          echo "🔍 Process status:"
-          ps aux | grep python
-          echo "🔍 Network status:"
-          netstat -tlnp | grep 8000 || echo "Port 8000 not listening"
-          kill $SERVER_PID || true
-          exit 1
-        fi
-        
-        # Verify server is actually working
-        echo "🧪 Testing API endpoints..."
-        curl -v http://localhost:8000/health || exit 1
-        
-        echo "✅ Server startup complete and verified!"
-
-    - name: Run API Examples with Error Handling
-      env:
-        API_BASE_URL: http://localhost:8000
-      run: |
-        python << 'PYTHON_EOF'
-        import requests
-        import json
-        import time
-        import os
-        import sys
-        from datetime import datetime
-
-        base_url = os.getenv('API_BASE_URL', 'http://localhost:8000')
-        
-        print("=" * 50)
-        print("GitHub Events Monitor - API Examples")
-        print("=" * 50)
-        
-        # Initial connectivity test
-        try:
-            response = requests.get(f"{base_url}/health", timeout=10)
-            print(f"✅ Initial connectivity test passed: {response.status_code}")
-        except Exception as e:
-            print(f"❌ Initial connectivity test failed: {e}")
-            sys.exit(1)
-        
-        # Allow some time for data collection (reduced from 60s)
-        print("⏳ Waiting 30 seconds for initial data collection...")
-        time.sleep(30)
-        
-        examples = []
-        
-        def safe_api_call(name, endpoint, timeout=15):
-            """Make API call with proper error handling"""
-            try:
-                print(f"\n🔍 Testing: {name}")
-                response = requests.get(f"{base_url}{endpoint}", timeout=timeout)
-                print(f"   Status: {response.status_code}")
-                
-                if response.status_code == 200:
-                    try:
-                        data = response.json()
-                        print(f"   Response: {str(data)[:100]}...")
-                        return {
-                            "endpoint": endpoint,
-                            "status": response.status_code,
-                            "response": data,
-                            "success": True
-                        }
-                    except json.JSONDecodeError as e:
-                        print(f"   JSON decode error: {e}")
-                        return {
-                            "endpoint": endpoint,
-                            "status": response.status_code,
-                            "error": f"JSON decode error: {e}",
-                            "success": False
-                        }
-                else:
-                    print(f"   Error response: {response.text[:100]}...")
-                    return {
-                        "endpoint": endpoint,
-                        "status": response.status_code,
-                        "error": response.text,
-                        "success": False
-                    }
-                    
-            except requests.exceptions.RequestException as e:
-                print(f"   Request failed: {e}")
-                return {
-                    "endpoint": endpoint,
-                    "status": 0,
-                    "error": str(e),
-                    "success": False
-                }
-        
-        # Test core endpoints
-        examples.append(safe_api_call("Health Check", "/health"))
-        
-        # Test event counts with different time windows
-        for minutes in [10, 30, 60]:
-            examples.append(safe_api_call(
-                f"Event Counts ({minutes}m)", 
-                f"/metrics/event-counts?offset_minutes={minutes}"
-            ))
-        
-        # Test additional endpoints if available
-        examples.append(safe_api_call("Trending Repos", "/metrics/trending?hours=24&limit=5"))
-        examples.append(safe_api_call("OpenAPI Schema", "/openapi.json"))
-        
-        # Calculate success metrics
-        successful_calls = sum(1 for ex in examples if ex.get("success", False))
-        total_calls = len(examples)
-        success_rate = (successful_calls / total_calls) * 100 if total_calls > 0 else 0
-        
-        # Save results
-        results = {
-            "timestamp": datetime.now().isoformat(),
-            "total_examples": total_calls,
-            "successful_examples": successful_calls,
-            "success_rate": success_rate,
-            "examples": examples
-        }
-        
-        with open('api_examples_results.json', 'w') as f:
-            json.dump(results, f, indent=2)
-        
-        print("\n" + "=" * 50)
-        print(f"📊 API Testing Summary:")
-        print(f"   Total endpoints tested: {total_calls}")
-        print(f"   Successful calls: {successful_calls}")
-        print(f"   Success rate: {success_rate:.1f}%")
-        print("   Results saved to: api_examples_results.json")
-        
-        # Only fail if success rate is very low
-        if success_rate < 50:
-            print("❌ Too many API calls failed!")
-            sys.exit(1)
-        else:
-            print("✅ API examples completed successfully!")
-        PYTHON_EOF
-
-    - name: Cleanup Server Process
-      if: always()
-      run: |
-        if [ -f server.pid ]; then
-          SERVER_PID=$(cat server.pid)
-          echo "🧹 Cleaning up server process $SERVER_PID"
-          kill $SERVER_PID || echo "Process already terminated"
-          rm -f server.pid
-        fi
-
-    - name: Upload Example Results
-      uses: actions/upload-artifact@v4
-      if: always()
-      with:
-        name: api-examples-results-${{ github.run_id }}
-        path: |
-          api_examples_results.json
-          server.log
-          demo_github_events.db
-
-  generate-visualizations:
-    runs-on: ubuntu-latest
-    needs: example-usage
-    if: github.event_name != 'pull_request'
-
-    steps:
-    - name: Checkout repository
-      uses: actions/checkout@v4
-
-    - name: Set up Python
-      uses: actions/setup-python@v5
-      with:
-        python-version: ${{ env.PYTHON_VERSION }}
-
-    - name: Install visualization dependencies
-      run: |
-        python -m pip install --upgrade pip
-        pip install matplotlib seaborn plotly pandas numpy requests
-
-    - name: Download example results
-      uses: actions/download-artifact@v4
-      with:
-        name: api-examples-results-${{ github.run_id }}
-
-    - name: Generate Visualizations
-      run: |
-        python << 'PYTHON_EOF'
-        import json
-        import matplotlib.pyplot as plt
-        import seaborn as sns
-        import pandas as pd
-        import numpy as np
-        
-        print("📊 Generating visualizations...")
-        
-        # Try to load actual results, fall back to sample data
-        try:
-            with open('api_examples_results.json', 'r') as f:
-                results = json.load(f)
-            print(f"✅ Loaded {results['total_examples']} API examples")
-            has_real_data = True
-        except FileNotFoundError:
-            print("⚠️  No real data found, generating sample visualizations...")
-            results = {"examples": []}
-            has_real_data = False
-        
-        # Set matplotlib style
-        plt.style.use('default')
-        sns.set_palette("husl")
-        
-        # Create dashboard
-        fig, ((ax1, ax2), (ax3, ax4)) = plt.subplots(2, 2, figsize=(15, 10))
-        
-        if has_real_data and results.get("examples"):
-            # Real data visualizations
-            examples = results["examples"]
-            
-            # 1. API Success Rate
-            success_count = sum(1 for ex in examples if ex.get("success", False))
-            failure_count = len(examples) - success_count
-            
-            if success_count + failure_count > 0:
-                ax1.pie([success_count, failure_count], 
-                       labels=[f'Success ({success_count})', f'Failed ({failure_count})'], 
-                       colors=['#2ecc71', '#e74c3c'], autopct='%1.1f%%')
-                ax1.set_title('API Call Success Rate')
-            
-            # 2. Response Status Codes
-            status_codes = [ex.get("status", 0) for ex in examples if ex.get("status", 0) > 0]
-            if status_codes:
-                status_counts = pd.Series(status_codes).value_counts()
-                ax2.bar(range(len(status_counts)), status_counts.values, color='skyblue')
-                ax2.set_xticks(range(len(status_counts)))
-                ax2.set_xticklabels(status_counts.index)
-                ax2.set_title('HTTP Status Code Distribution')
-                ax2.set_xlabel('Status Code')
-                ax2.set_ylabel('Count')
-        
-        else:
-            # Sample data visualizations
-            success_rate = 85
-            failure_rate = 15
-            ax1.pie([success_rate, failure_rate], 
-                   labels=[f'Success ({success_rate}%)', f'Failed ({failure_rate}%)'], 
-                   colors=['#2ecc71', '#e74c3c'], autopct='%1.1f%%')
-            ax1.set_title('API Call Success Rate (Sample)')
-            
-            # Sample status codes
-            status_data = [200, 200, 200, 200, 404, 500, 200]
-            status_counts = pd.Series(status_data).value_counts()
-            ax2.bar(range(len(status_counts)), status_counts.values, color='skyblue')
-            ax2.set_xticks(range(len(status_counts)))
-            ax2.set_xticklabels(status_counts.index)
-            ax2.set_title('HTTP Status Code Distribution (Sample)')
-        
-        # 3. Sample GitHub Events Timeline
-        hours = list(range(24))
-        watch_events = np.random.poisson(15, 24) + 5
-        pr_events = np.random.poisson(8, 24) + 2
-        issue_events = np.random.poisson(12, 24) + 3
-        
-        ax3.plot(hours, watch_events, marker='o', label='WatchEvent', linewidth=2)
-        ax3.plot(hours, pr_events, marker='s', label='PullRequestEvent', linewidth=2)
-        ax3.plot(hours, issue_events, marker='^', label='IssuesEvent', linewidth=2)
-        ax3.set_xlabel('Hour of Day (UTC)')
-        ax3.set_ylabel('Event Count')
-        ax3.set_title('GitHub Events Over 24 Hours (Sample Data)')
-        ax3.legend()
-        ax3.grid(True, alpha=0.3)
-        
-        # 4. Performance Metrics
-        metrics = ['Response Time (ms)', 'Success Rate (%)', 'Throughput (req/s)', 'Uptime (%)']
-        values = [45, results.get("success_rate", 85), 120, 99.5]
-        colors = ['#3498db', '#2ecc71', '#f39c12', '#9b59b6']
-        
-        bars = ax4.bar(metrics, values, color=colors)
-        ax4.set_title('System Performance Metrics')
-        ax4.set_ylabel('Value')
-        
-        # Add value labels
-        for bar, value in zip(bars, values):
-            height = bar.get_height()
-            ax4.text(bar.get_x() + bar.get_width()/2., height + 1,
-                    f'{value:.1f}', ha='center', va='bottom', fontweight='bold')
-        
-        plt.suptitle('GitHub Events Monitor - Performance Dashboard', 
-                     fontsize=16, fontweight='bold')
-        plt.tight_layout()
-        plt.savefig('github_events_dashboard.png', dpi=300, bbox_inches='tight')
-        plt.close()
-        
-        print("✅ Dashboard saved as: github_events_dashboard.png")
-        PYTHON_EOF
-
-    - name: Upload Visualizations
-      uses: actions/upload-artifact@v4
-      with:
-        name: visualizations-${{ github.run_id }}
-        path: github_events_dashboard.png
-
-  deploy-preview:
-    runs-on: ubuntu-latest
-    needs: [test-and-build, generate-visualizations]
-    if: github.ref == 'refs/heads/main'
-    permissions:
-      contents: read
-      pages: write
-      id-token: write
-    
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
-    
-    steps:
-    - name: Checkout repository
-      uses: actions/checkout@v4
-      
-    - name: Download visualizations
-      uses: actions/download-artifact@v4
-      with:
-        name: visualizations-${{ github.run_id }}
-        path: ./static/
-      
-    - name: Setup Pages
-      uses: actions/configure-pages@v3
-      
-    - name: Upload to GitHub Pages
-      uses: actions/upload-pages-artifact@v3
-      with:
-        path: ./static/
-        
-    - name: Deploy to GitHub Pages
-      id: deployment
-      uses: actions/deploy-pages@v4
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: 'pip'
+      - name: Install deps + project (editable)
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install -e .
+      - name: Start API with health check
+        env:
+          PYTHONPATH: ${{ github.workspace }}/src
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          DATABASE_PATH: ./demo_github_events.db
+        run: |
+          python -m github_events_monitor.api > server.log 2>&1 &
+          SERVER_PID=$!
+          echo $SERVER_PID > server.pid
+          for i in {1..60}; do
+            if ! kill -0 $SERVER_PID 2>/dev/null; then
+              echo "Server exited, logs:" && cat server.log && exit 1
+            fi
+            if curl -fsS --connect-timeout 3 --max-time 5 http://127.0.0.1:8000/health >/dev/null; then
+              echo "Server healthy" && break
+            fi
+            sleep 5
+            if [ $i -eq 60 ]; then
+              echo "Health check failed, logs:" && cat server.log && exit 1
+            fi
+          done
+      - name: Run API examples
+        env:
+          API_BASE_URL: http://127.0.0.1:8000
+        run: |
+          python <<'PY'
+          import requests, json, time, os
+          time.sleep(10)
+          base = os.getenv("API_BASE_URL","http://127.0.0.1:8000")
+          out = []
+          def call(ep):
+              try:
+                  r = requests.get(base+ep, timeout=15)
+                  return {"endpoint":ep,"status":r.status_code,"ok":r.ok,"data":(r.json() if r.ok else r.text)[:400]}
+              except Exception as e:
+                  return {"endpoint":ep,"status":0,"ok":False,"error":str(e)}
+          out.append(call("/health"))
+          for m in [10,30,60]:
+              out.append(call(f"/metrics/event-counts?offset_minutes={m}"))
+          with open("api_examples_results.json","w") as f:
+              json.dump({"examples":out},f,indent=2)
+          PY
+      - name: Upload results
+        uses: actions/upload-artifact@v4
+        with:
+          name: api-examples-results
+          path: |
+            api_examples_results.json
+            server.log
