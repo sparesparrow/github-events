@@ -110,6 +110,7 @@ jobs:
             except Exception as e:
               return 0, {"error": str(e)}
 
+          # Ensure directory exists
           os.makedirs("pages_content", exist_ok=True)
 
           # Health
@@ -123,8 +124,6 @@ jobs:
 
           # Trending: 24 hours
           s_t, d_t = get("/metrics/trending", hours=24, limit=10)
-          # Dashboard expects: data.repositories[*].repo_name|total_events|watch_events|pr_events|issue_events
-          # If empty, add small sample so first deploy isn't blank.
           repos = (d_t or {}).get("repositories") if isinstance(d_t, dict) else None
           if not repos:
             d_t = {
@@ -139,27 +138,68 @@ jobs:
             }
             s_t = 200
 
-          # Write files used by the dashboard
-          with open("pages_content/health.json","w") as f: json.dump({"status": s_h, "data": d_h}, f, indent=2)
-          with open("pages_content/event_counts_10.json","w") as f: json.dump(out[10], f, indent=2)
-          with open("pages_content/event_counts_60.json","w") as f: json.dump(out[60], f, indent=2)
-          with open("pages_content/trending.json","w") as f: json.dump({"status": s_t, "data": d_t}, f, indent=2)
+          # Write JSON files - ensure they exist and have content
+          files_written = []
+          
+          health_data = {"status": s_h, "data": d_h}
+          with open("pages_content/health.json","w") as f: 
+            json.dump(health_data, f, indent=2)
+          files_written.append("health.json")
 
-          # Quick diagnostics
+          ec10_data = out[10]
+          with open("pages_content/event_counts_10.json","w") as f: 
+            json.dump(ec10_data, f, indent=2)
+          files_written.append("event_counts_10.json")
+
+          ec60_data = out[60]
+          with open("pages_content/event_counts_60.json","w") as f: 
+            json.dump(ec60_data, f, indent=2)
+          files_written.append("event_counts_60.json")
+
+          trending_data = {"status": s_t, "data": d_t}
+          with open("pages_content/trending.json","w") as f: 
+            json.dump(trending_data, f, indent=2)
+          files_written.append("trending.json")
+
+          status_data = {
+            "base_url": base,
+            "health_status": s_h,
+            "event_counts_10_status": out[10]["status"],
+            "event_counts_60_status": out[60]["status"],
+            "trending_status": s_t,
+            "generated_at": __import__("datetime").datetime.utcnow().isoformat()+"Z"
+          }
           with open("pages_content/data_status.json","w") as f:
-            json.dump({
-              "base_url": base,
-              "health_status": s_h,
-              "event_counts_10_status": out[10]["status"],
-              "event_counts_60_status": out[60]["status"],
-              "trending_status": s_t,
-              "generated_at": __import__("datetime").datetime.utcnow().isoformat()+"Z"
-            }, f, indent=2)
+            json.dump(status_data, f, indent=2)
+          files_written.append("data_status.json")
+
+          print(f"✅ JSON files written: {files_written}")
+          
+          # Verify files exist and show sizes
+          for fname in files_written:
+            fpath = f"pages_content/{fname}"
+            if os.path.exists(fpath):
+              size = os.path.getsize(fpath)
+              print(f"  {fname}: {size} bytes")
+            else:
+              print(f"  ❌ {fname}: FILE MISSING")
           PY
+
+      - name: Verify pages_content directory
+        run: |
+          echo "📁 Contents of pages_content directory:"
+          ls -la pages_content/
+          echo "📊 JSON file previews:"
+          for f in pages_content/*.json; do
+            if [ -f "$f" ]; then
+              echo "=== $f ==="
+              head -n 3 "$f"
+              echo
+            fi
+          done
 
       - name: Build Plotly dashboard (index.html) with schema-aligned JS
         run: |
-          mkdir -p pages_content
           cat > pages_content/index.html <<'HTML'
           <!doctype html>
           <html lang="en">
@@ -176,7 +216,8 @@ jobs:
               @media(min-width:960px){.grid{grid-template-columns:1fr 1fr}}
               .pill{display:inline-block;background:#0b1220;border:1px solid #1f2937;border-radius:8px;padding:8px 10px;margin:0 10px 10px 0}
               #trendChart,#stackedChart,#countsChart{height:420px}
-              pre{background:#0b1220;border:1px solid #1f2937;border-radius:8px;padding:12px;overflow:auto}
+              pre{background:#0b1220;border:1px solid #1f2937;border-radius:8px;padding:12px;overflow:auto;font-size:12px}
+              .error{color:#f87171;background:#fee2e2;padding:10px;border-radius:5px;margin:10px 0}
             </style>
           </head>
           <body>
@@ -191,7 +232,7 @@ jobs:
                 <span class="pill"><a href="event_counts_10.json" target="_blank">event_counts_10.json</a></span>
                 <span class="pill"><a href="event_counts_60.json" target="_blank">event_counts_60.json</a></span>
               </div>
-              <p>Charts below are built from JSON exported during CI and deployed here; if data is empty, a clear message and a small sample fallback are shown to keep visuals informative.</p>
+              <p>Charts below are built from JSON exported during CI and deployed here. Real GitHub Events API data from the last successful workflow run.</p>
             </div>
 
             <div class="grid">
@@ -215,12 +256,32 @@ jobs:
               <h3>Debug console</h3>
               <pre id="debugBox">Loading…</pre>
             </div>
+            
+            <div id="errorBox"></div>
           </div>
 
           <script>
-          async function loadJSON(p){ try{const r=await fetch(p,{cache:'no-store'}); return await r.json();}catch(e){return {status:0,data:{error:String(e)}}}
+          async function loadJSON(p){ 
+            try{
+              console.log(`Fetching ${p}...`);
+              const r=await fetch(p,{cache:'no-store'}); 
+              if (!r.ok) {
+                throw new Error(`HTTP ${r.status}: ${r.statusText}`);
+              }
+              const data = await r.json();
+              console.log(`✅ Loaded ${p}:`, data);
+              return data;
+            } catch(e) {
+              console.error(`❌ Failed to load ${p}:`, e);
+              return {status:0,data:{error:String(e)}};
+            }
+          }
           function now(){return new Date().toLocaleString()}
           function log(obj){document.getElementById('debugBox').textContent = JSON.stringify(obj,null,2)}
+          function showError(msg){
+            const errorBox = document.getElementById('errorBox');
+            errorBox.innerHTML = `<div class="error">⚠️ ${msg}</div>`;
+          }
 
           (async () => {
             const health = await loadJSON('health.json');
@@ -232,7 +293,18 @@ jobs:
             document.getElementById('updated').textContent = now();
             log({health, trending_status: trending?.status, ec10_status: ec10?.status, ec60_status: ec60?.status});
 
-            // ----- Trending (schema-aligned: repo_name, total_events, watch_events, pr_events, issue_events) -----
+            // Check for fetch errors
+            const errors = [];
+            if (health?.status === 0) errors.push('health.json');
+            if (trending?.status === 0) errors.push('trending.json');
+            if (ec10?.status === 0) errors.push('event_counts_10.json');
+            if (ec60?.status === 0) errors.push('event_counts_60.json');
+            
+            if (errors.length > 0) {
+              showError(`Failed to load: ${errors.join(', ')}. Check if files exist in GitHub Pages.`);
+            }
+
+            // Trending (schema-aligned: repo_name, total_events, watch_events, pr_events, issue_events)
             const repos = (trending?.data?.repositories)||[];
             if (!repos.length) {
               document.getElementById('trendMsg').innerHTML = '<em>No trending data available yet — showing sample placeholders.</em>';
@@ -255,7 +327,7 @@ jobs:
             ], {barmode:'stack',paper_bgcolor:'#111827',plot_bgcolor:'#111827',font:{color:'#e2e8f0'},margin:{t:10,l:40,r:10,b:80},xaxis:{tickangle:-30},yaxis:{title:'Events'}},
                {displayModeBar:false,responsive:true});
 
-            // ----- Event counts (schema-aligned: data.counts.{WatchEvent,PullRequestEvent,IssuesEvent}) -----
+            // Event counts (schema-aligned: data.counts.{WatchEvent,PullRequestEvent,IssuesEvent})
             const labels = ['WatchEvent','PullRequestEvent','IssuesEvent'];
             function unpack(d){
               const x = d?.data?.counts || {};
@@ -274,6 +346,13 @@ jobs:
           </body>
           </html>
           HTML
+
+      - name: Final verification before upload
+        run: |
+          echo "🔍 Final check of pages_content before GitHub Pages upload:"
+          find pages_content -type f -name "*.json" -o -name "*.html" | sort
+          echo "📊 File sizes:"
+          du -h pages_content/*
 
       - name: Configure Pages
         uses: actions/configure-pages@v5
@@ -294,9 +373,8 @@ jobs:
           name: pages-debug-${{ github.run_id }}
           path: |
             server.log
-            pages_content/*.json
-            pages_content/index.html
-
+            pages_content/
+            
       - name: Stop API
         if: always()
         run: |
