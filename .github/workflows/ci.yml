@@ -10,7 +10,6 @@ on:
 env:
   PYTHON_VERSION: '3.11'
 
-# Avoid concurrent Pages deployments colliding
 concurrency:
   group: pages
   cancel-in-progress: true
@@ -113,31 +112,40 @@ jobs:
 
           os.makedirs("pages_content", exist_ok=True)
 
+          # Health
           s_h, d_h = get("/health")
+
+          # Event counts: last 10 and 60 minutes
           out = {}
           for m in (10, 60):
             s, d = get("/metrics/event-counts", offset_minutes=m)
             out[m] = {"status": s, "data": d}
 
+          # Trending: 24 hours
           s_t, d_t = get("/metrics/trending", hours=24, limit=10)
+          # Dashboard expects: data.repositories[*].repo_name|total_events|watch_events|pr_events|issue_events
+          # If empty, add small sample so first deploy isn't blank.
           repos = (d_t or {}).get("repositories") if isinstance(d_t, dict) else None
           if not repos:
             d_t = {
-              "timeframe_hours": 24,
+              "hours": 24,
               "repositories": [
-                {"name":"sample/repo-a","events":12,"watch_events":6,"pr_events":3,"issue_events":3},
-                {"name":"sample/repo-b","events":9,"watch_events":4,"pr_events":3,"issue_events":2},
-                {"name":"sample/repo-c","events":7,"watch_events":3,"pr_events":2,"issue_events":2},
+                {"repo_name":"sample/repo-a","total_events":12,"watch_events":6,"pr_events":3,"issue_events":3},
+                {"repo_name":"sample/repo-b","total_events":9,"watch_events":4,"pr_events":3,"issue_events":2},
+                {"repo_name":"sample/repo-c","total_events":7,"watch_events":3,"pr_events":2,"issue_events":2},
               ],
+              "timestamp": __import__("datetime").datetime.utcnow().isoformat()+"Z",
               "note":"sample fallback due to empty or unavailable trending data"
             }
             s_t = 200
 
+          # Write files used by the dashboard
           with open("pages_content/health.json","w") as f: json.dump({"status": s_h, "data": d_h}, f, indent=2)
           with open("pages_content/event_counts_10.json","w") as f: json.dump(out[10], f, indent=2)
           with open("pages_content/event_counts_60.json","w") as f: json.dump(out[60], f, indent=2)
           with open("pages_content/trending.json","w") as f: json.dump({"status": s_t, "data": d_t}, f, indent=2)
 
+          # Quick diagnostics
           with open("pages_content/data_status.json","w") as f:
             json.dump({
               "base_url": base,
@@ -149,7 +157,7 @@ jobs:
             }, f, indent=2)
           PY
 
-      - name: Build Plotly dashboard (index.html)
+      - name: Build Plotly dashboard (index.html) with schema-aligned JS
         run: |
           mkdir -p pages_content
           cat > pages_content/index.html <<'HTML'
@@ -181,8 +189,9 @@ jobs:
                 <span class="pill"><a href="data_status.json" target="_blank">data_status.json</a></span>
                 <span class="pill"><a href="trending.json" target="_blank">trending.json</a></span>
                 <span class="pill"><a href="event_counts_10.json" target="_blank">event_counts_10.json</a></span>
+                <span class="pill"><a href="event_counts_60.json" target="_blank">event_counts_60.json</a></span>
               </div>
-              <p>Charts below are built from JSON exported during CI and deployed here; if data is empty, a clear message and small sample fallback are shown to keep visuals informative.</p>
+              <p>Charts below are built from JSON exported during CI and deployed here; if data is empty, a clear message and a small sample fallback are shown to keep visuals informative.</p>
             </div>
 
             <div class="grid">
@@ -223,15 +232,16 @@ jobs:
             document.getElementById('updated').textContent = now();
             log({health, trending_status: trending?.status, ec10_status: ec10?.status, ec60_status: ec60?.status});
 
+            // ----- Trending (schema-aligned: repo_name, total_events, watch_events, pr_events, issue_events) -----
             const repos = (trending?.data?.repositories)||[];
             if (!repos.length) {
               document.getElementById('trendMsg').innerHTML = '<em>No trending data available yet — showing sample placeholders.</em>';
             }
-            const names = repos.map(r => (r.name||'repo').split('/').slice(-1)[0]);
-            const totals = repos.map(r => r.events||0);
+            const names = repos.map(r => (r.repo_name||'repo').split('/').slice(-1)[0]);
+            const totals = repos.map(r => r.total_events||0);
             const watch = repos.map(r => r.watch_events||0);
-            const prs = repos.map(r => r.pr_events||0);
-            const issues = repos.map(r => r.issue_events||0);
+            const prs   = repos.map(r => r.pr_events||0);
+            const issues= repos.map(r => r.issue_events||0);
             const n = Math.min(names.length, 8);
 
             Plotly.newPlot('trendChart', [{x:names,y:totals,type:'bar',marker:{color:'#60a5fa'}}],
@@ -239,15 +249,21 @@ jobs:
               {displayModeBar:false,responsive:true});
 
             Plotly.newPlot('stackedChart', [
-              {x:names.slice(0,n),y:watch.slice(0,n),type:'bar',name:'Watch',marker:{color:'#34d399'}},
-              {x:names.slice(0,n),y:prs.slice(0,n),type:'bar',name:'PR',marker:{color:'#fbbf24'}},
+              {x:names.slice(0,n),y:watch.slice(0,n),type:'bar',name:'Watch', marker:{color:'#34d399'}},
+              {x:names.slice(0,n),y:prs.slice(0,n),  type:'bar',name:'PR',    marker:{color:'#fbbf24'}},
               {x:names.slice(0,n),y:issues.slice(0,n),type:'bar',name:'Issues',marker:{color:'#f472b6'}},
             ], {barmode:'stack',paper_bgcolor:'#111827',plot_bgcolor:'#111827',font:{color:'#e2e8f0'},margin:{t:10,l:40,r:10,b:80},xaxis:{tickangle:-30},yaxis:{title:'Events'}},
                {displayModeBar:false,responsive:true});
 
+            // ----- Event counts (schema-aligned: data.counts.{WatchEvent,PullRequestEvent,IssuesEvent}) -----
             const labels = ['WatchEvent','PullRequestEvent','IssuesEvent'];
-            function unpack(d){ const x=d?.data||{}; return labels.map(k=>x[k]||0); }
-            const v10 = unpack(ec10); const v60 = unpack(ec60);
+            function unpack(d){
+              const x = d?.data?.counts || {};
+              return labels.map(k => x[k] || 0);
+            }
+            const v10 = unpack(ec10);
+            const v60 = unpack(ec60);
+
             Plotly.newPlot('countsChart', [
               {x:labels,y:v10,type:'bar',name:'10 min',marker:{color:'#818cf8'}},
               {x:labels,y:v60,type:'bar',name:'60 min',marker:{color:'#22d3ee'}},
@@ -284,4 +300,4 @@ jobs:
       - name: Stop API
         if: always()
         run: |
-          if [ -f server.pid ]; then kill "$(cat server.pid)" 2>/dev/null || true; rm -f server.pid; fi
+          if [ -f server.pid ] ; then kill "$(cat server.pid)" 2>/dev/null || true ; rm -f server.pid ; fi
