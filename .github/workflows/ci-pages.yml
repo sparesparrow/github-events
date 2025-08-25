@@ -1,0 +1,257 @@
+name: Build API data and publish Pages dashboard
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+env:
+  PYTHON_VERSION: '3.11'
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: 'pip'
+
+      - name: Install deps + project (editable) + requests
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt || true
+          pip install -e .
+          pip install requests
+
+      - name: Start API with health check
+        env:
+          PYTHONPATH: ${{ github.workspace }}/src
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          DATABASE_PATH: ./pages_demo.db
+        run: |
+          python -m github_events_monitor.api > server.log 2>&1 &
+          SERVER_PID=$!
+          echo $SERVER_PID > server.pid
+          for i in {1..36}; do
+            if ! kill -0 $SERVER_PID 2>/dev/null; then
+              echo "❌ Server exited, logs:" && tail -n 200 server.log && exit 1
+            fi
+            if curl -fsS --connect-timeout 3 --max-time 5 http://127.0.0.1:8000/health >/dev/null; then
+              echo "✅ API healthy" && break
+            fi
+            echo "⏳ waiting for API... ($i/36)"; sleep 5
+            if [ $i -eq 36 ]; then
+              echo "❌ Health check timed out"; tail -n 200 server.log; exit 1
+            fi
+          done
+
+      - name: Query API and produce JSON for dashboard
+        env:
+          BASE_URL: http://127.0.0.1:8000
+        run: |
+          python <<'PY'
+          import os, json, requests, time
+          base = os.environ.get("BASE_URL","http://127.0.0.1:8000")
+          def get(ep, **params):
+            try:
+              r = requests.get(base+ep, params=params, timeout=20)
+              return r.status_code, (r.json() if r.ok else {"error": r.text})
+            except Exception as e:
+              return 0, {"error": str(e)}
+          time.sleep(5)
+          out = {}
+          for m in (10, 30, 60):
+            sc, data = get("/metrics/event-counts", offset_minutes=m)
+            out[f"event_counts_{m}"] = dict(status=sc, data=data)
+          sc_t, data_t = get("/metrics/trending", hours=24, limit=10)
+          out["trending"] = dict(status=sc_t, data=data_t)
+          sc_h, data_h = get("/health")
+          out["health"] = dict(status=sc_h, data=data_h)
+          os.makedirs("pages_content", exist_ok=True)
+          # Save individual JSON for fetch() on the dashboard
+          with open("pages_content/event_counts_10.json","w") as f: json.dump(out["event_counts_10"], f, indent=2)
+          with open("pages_content/event_counts_60.json","w") as f: json.dump(out["event_counts_60"], f, indent=2)
+          with open("pages_content/trending.json","w") as f: json.dump(out["trending"], f, indent=2)
+          with open("pages_content/health.json","w") as f: json.dump(out["health"], f, indent=2)
+          # Also keep a summary for inspection
+          with open("pages_content/api_summary.json","w") as f: json.dump(out, f, indent=2)
+          PY
+
+      - name: Build Plotly dashboard (index.html)
+        run: |
+          cat > pages_content/index.html <<'HTML'
+          <!DOCTYPE html>
+          <html lang="en">
+          <head>
+            <meta charset="utf-8" />
+            <meta name="viewport" content="width=device-width, initial-scale=1" />
+            <title>GitHub Events Monitor — Dashboard</title>
+            <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
+            <style>
+              body { font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; margin: 24px; background: #0f172a; color: #e2e8f0; }
+              a { color: #60a5fa; }
+              .wrap { max-width: 1200px; margin: 0 auto; }
+              .card { background: #111827; border: 1px solid #1f2937; border-radius: 10px; padding: 18px; margin-bottom: 18px; }
+              h1 { margin: 0 0 8px 0; }
+              .grid { display: grid; grid-template-columns: 1fr; gap: 18px; }
+              @media (min-width: 960px) { .grid { grid-template-columns: 1fr 1fr; } }
+              .kpi { display: flex; gap: 18px; flex-wrap: wrap; }
+              .kpi .pill { background:#0b1220; border:1px solid #1f2937; border-radius: 8px; padding: 10px 12px; }
+              #trendChart, #stackedChart, #countsChart { height: 420px; }
+              code { background: #0b1220; padding: 2px 6px; border-radius: 6px; border: 1px solid #1f2937; }
+            </style>
+          </head>
+          <body>
+          <div class="wrap">
+            <div class="card">
+              <h1>🚀 GitHub Events Monitor — Dashboard</h1>
+              <div class="kpi">
+                <div class="pill">Status: <span id="status">Loading…</span></div>
+                <div class="pill">Updated: <span id="updated">–</span></div>
+                <div class="pill"><a href="api_summary.json" target="_blank">Raw summary JSON</a></div>
+                <div class="pill"><a href="trending.json" target="_blank">Trending JSON</a></div>
+              </div>
+              <p>Interactive charts are generated from JSON exported by the CI job while the API is running, then deployed to GitHub Pages. Data freshness depends on the latest successful run. </p>
+            </div>
+
+            <div class="grid">
+              <div class="card">
+                <h2>🔥 Trending Repositories (24h)</h2>
+                <div id="trendChart"></div>
+              </div>
+              <div class="card">
+                <h2>📦 Event Type Breakdown (Top 8)</h2>
+                <div id="stackedChart"></div>
+              </div>
+            </div>
+
+            <div class="card">
+              <h2>⏱️ Event Counts (last 10 vs 60 minutes)</h2>
+              <div id="countsChart"></div>
+            </div>
+
+            <div class="card">
+              <h3>Endpoints sampled</h3>
+              <ul>
+                <li><code>/metrics/trending?hours=24&amp;limit=10</code></li>
+                <li><code>/metrics/event-counts?offset_minutes=10</code></li>
+                <li><code>/metrics/event-counts?offset_minutes=60</code></li>
+                <li><code>/health</code></li>
+              </ul>
+            </div>
+          </div>
+
+          <script>
+          async function loadJSON(path) {
+            try { const r = await fetch(path, { cache: 'no-store' }); return await r.json(); }
+            catch (e) { return { status: 0, data: { error: String(e) } }; }
+          }
+
+          function fmt(ts) {
+            try { return new Date(ts).toLocaleString(); } catch { return '–'; }
+          }
+
+          (async () => {
+            const health = await loadJSON('health.json');
+            const trending = await loadJSON('trending.json');
+            const ec10 = await loadJSON('event_counts_10.json');
+            const ec60 = await loadJSON('event_counts_60.json');
+            document.getElementById('status').textContent = health?.status === 200 ? 'Healthy' : `Status ${health?.status||'N/A'}`;
+            document.getElementById('updated').textContent = fmt(new Date().toISOString());
+
+            // Trending bar chart
+            let repos = [];
+            let totals = [];
+            let watch = [];
+            let prs = [];
+            let issues = [];
+            try {
+              const arr = (trending?.data?.repositories) || [];
+              for (const r of arr) {
+                repos.push((r.name||'repo').split('/').slice(-1));
+                totals.push(r.events ?? 0);
+                watch.push(r.watch_events ?? 0);
+                prs.push(r.pr_events ?? 0);
+                issues.push(r.issue_events ?? 0);
+              }
+            } catch { /* noop */ }
+
+            Plotly.newPlot('trendChart', [{
+              x: repos, y: totals, type: 'bar', marker: {color: '#60a5fa'}
+            }], {
+              paper_bgcolor:'#111827', plot_bgcolor:'#111827', font:{color:'#e2e8f0'},
+              margin:{t:10,l:40,r:10,b:80}, xaxis:{tickangle:-30}, yaxis:{title:'Events'}
+            }, {displayModeBar:false, responsive:true});
+
+            // Stacked bar by event type (top 8)
+            const n = Math.min(repos.length, 8);
+            Plotly.newPlot('stackedChart', [
+              { x: repos.slice(0,n), y: watch.slice(0,n), type:'bar', name:'Watch', marker:{color:'#34d399'} },
+              { x: repos.slice(0,n), y: prs.slice(0,n), type:'bar', name:'PR', marker:{color:'#fbbf24'} },
+              { x: repos.slice(0,n), y: issues.slice(0,n), type:'bar', name:'Issues', marker:{color:'#f472b6'} },
+            ], {
+              barmode:'stack', paper_bgcolor:'#111827', plot_bgcolor:'#111827', font:{color:'#e2e8f0'},
+              margin:{t:10,l:40,r:10,b:80}, xaxis:{tickangle:-30}, yaxis:{title:'Events'}
+            }, {displayModeBar:false, responsive:true});
+
+            // Event counts comparison (10 vs 60 minutes)
+            function unpackCounts(obj) {
+              const d = obj?.data || {};
+              return ['WatchEvent','PullRequestEvent','IssuesEvent'].map(k => d[k]||0);
+            }
+            const labels = ['WatchEvent','PullRequestEvent','IssuesEvent'];
+            const v10 = unpackCounts(ec10);
+            const v60 = unpackCounts(ec60);
+            Plotly.newPlot('countsChart', [
+              { x: labels, y: v10, type:'bar', name:'10 min', marker:{color:'#818cf8'} },
+              { x: labels, y: v60, type:'bar', name:'60 min', marker:{color:'#22d3ee'} },
+            ], {
+              barmode:'group', paper_bgcolor:'#111827', plot_bgcolor:'#111827', font:{color:'#e2e8f0'},
+              margin:{t:10,l:40,r:10,b:40}, yaxis:{title:'Events'}
+            }, {displayModeBar:false, responsive:true});
+          })();
+          </script>
+          </body>
+          </html>
+          HTML
+
+      - name: Configure Pages
+        uses: actions/configure-pages@v5
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: pages_content/
+
+      - name: Deploy to GitHub Pages
+        id: deploy
+        uses: actions/deploy-pages@v4
+
+      - name: Attach logs and JSON for debugging
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pages-debug-${{ github.run_id }}
+          path: |
+            server.log
+            pages_content/*.json
+            pages_content/index.html
+
+      - name: Stop API
+        if: always()
+        run: |
+          if [ -f server.pid ]; then kill $(cat server.pid) 2>/dev/null || true; rm -f server.pid; fi
