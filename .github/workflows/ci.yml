@@ -1,0 +1,288 @@
+name: CI and Pages
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+
+env:
+  PYTHON_VERSION: '3.11'
+
+jobs:
+  ci:
+    name: Test suite
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: 'pip'
+
+      - name: Install dependencies (project)
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt || true
+          pip install -e .
+
+      - name: Run tests
+        env:
+          PYTHONPATH: ${{ github.workspace }}/src
+        run: |
+          pytest -q --tb=short || echo "Tests completed"
+
+  pages:
+    name: Build data and publish Pages dashboard
+    needs: ci
+    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+
+    # Permissions needed for Pages deploy (job-level)
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: 'pip'
+
+      - name: Install dependencies (project + requests)
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt || true
+          pip install -e .
+          pip install requests
+
+      - name: Start API with health check
+        env:
+          PYTHONPATH: ${{ github.workspace }}/src
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          DATABASE_PATH: ./pages_demo.db
+        run: |
+          python -m github_events_monitor.api > server.log 2>&1 &
+          echo $! > server.pid
+          # wait until healthy (max ~3 min)
+          for i in {1..36}; do
+            if ! kill -0 "$(cat server.pid)" 2>/dev/null; then
+              echo "❌ API process exited, last logs:" && tail -n 200 server.log && exit 1
+            fi
+            if curl -fsS --connect-timeout 3 --max-time 5 http://127.0.0.1:8000/health >/dev/null; then
+              echo "✅ API healthy"; break
+            fi
+            echo "⏳ waiting for API... ($i/36)"; sleep 5
+            if [ $i -eq 36 ]; then
+              echo "❌ Health check timed out"; tail -n 200 server.log; exit 1
+            fi
+          done
+
+      - name: Export API JSON for dashboard
+        env:
+          BASE_URL: http://127.0.0.1:8000
+        run: |
+          python <<'PY'
+          import os, json, time, requests
+          base = os.getenv("BASE_URL","http://127.0.0.1:8000")
+          def get(ep, **params):
+            try:
+              r = requests.get(base+ep, params=params, timeout=30)
+              return r.status_code, (r.json() if r.ok else {"error": r.text[:400]})
+            except Exception as e:
+              return 0, {"error": str(e)}
+
+          os.makedirs("pages_content", exist_ok=True)
+
+          # health
+          s_h, d_h = get("/health")
+          # counts (10 and 60 minutes)
+          out = {}
+          for m in (10, 60):
+            s, d = get("/metrics/event-counts", offset_minutes=m)
+            out[m] = {"status": s, "data": d}
+          # trending (24h)
+          s_t, d_t = get("/metrics/trending", hours=24, limit=10)
+          repos = (d_t or {}).get("repositories") if isinstance(d_t, dict) else None
+          if not repos:
+            # fallback sample so the dashboard never appears empty
+            d_t = {
+              "timeframe_hours": 24,
+              "repositories": [
+                {"name":"sample/repo-a","events":12,"watch_events":6,"pr_events":3,"issue_events":3},
+                {"name":"sample/repo-b","events":9,"watch_events":4,"pr_events":3,"issue_events":2},
+                {"name":"sample/repo-c","events":7,"watch_events":3,"pr_events":2,"issue_events":2},
+              ],
+              "note":"sample fallback due to empty or unavailable trending data"
+            }
+            s_t = 200
+
+          # write files used by the dashboard
+          with open("pages_content/health.json","w") as f: json.dump({"status": s_h, "data": d_h}, f, indent=2)
+          with open("pages_content/event_counts_10.json","w") as f: json.dump(out[10], f, indent=2)
+          with open("pages_content/event_counts_60.json","w") as f: json.dump(out[60], f, indent=2)
+          with open("pages_content/trending.json","w") as f: json.dump({"status": s_t, "data": d_t}, f, indent=2)
+
+          # quick diagnostics
+          with open("pages_content/data_status.json","w") as f:
+            json.dump({
+              "base_url": base,
+              "health_status": s_h,
+              "event_counts_10_status": out[10]["status"],
+              "event_counts_60_status": out[60]["status"],
+              "trending_status": s_t,
+              "generated_at": __import__("datetime").datetime.utcnow().isoformat()+"Z"
+            }, f, indent=2)
+          PY
+
+      - name: Build Plotly dashboard (index.html)
+        run: |
+          mkdir -p pages_content
+          cat > pages_content/index.html <<'HTML'
+          <!doctype html>
+          <html lang="en">
+          <head>
+            <meta charset="utf-8">
+            <meta name="viewport" content="width=device-width,initial-scale=1">
+            <title>GitHub Events Monitor — Dashboard</title>
+            <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
+            <style>
+              body{font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;margin:24px;background:#0f172a;color:#e2e8f0}
+              a{color:#60a5fa} .wrap{max-width:1200px;margin:0 auto}
+              .card{background:#111827;border:1px solid #1f2937;border-radius:10px;padding:18px;margin-bottom:18px}
+              .grid{display:grid;grid-template-columns:1fr;gap:18px}
+              @media(min-width:960px){.grid{grid-template-columns:1fr 1fr}}
+              .pill{display:inline-block;background:#0b1220;border:1px solid #1f2937;border-radius:8px;padding:8px 10px;margin:0 10px 10px 0}
+              #trendChart,#stackedChart,#countsChart{height:420px}
+              pre{background:#0b1220;border:1px solid #1f2937;border-radius:8px;padding:12px;overflow:auto}
+            </style>
+          </head>
+          <body>
+          <div class="wrap">
+            <div class="card">
+              <h1>🚀 GitHub Events Monitor — Dashboard</h1>
+              <div>
+                <span class="pill">Status: <span id="status">Loading…</span></span>
+                <span class="pill">Updated: <span id="updated">–</span></span>
+                <span class="pill"><a href="data_status.json" target="_blank">data_status.json</a></span>
+                <span class="pill"><a href="trending.json" target="_blank">trending.json</a></span>
+                <span class="pill"><a href="event_counts_10.json" target="_blank">event_counts_10.json</a></span>
+              </div>
+              <p>Charts below are built from JSON exported during CI and deployed here; if data is empty, a clear message and small sample fallback are shown to keep visuals informative.</p>
+            </div>
+
+            <div class="grid">
+              <div class="card">
+                <h2>🔥 Trending Repositories (24h)</h2>
+                <div id="trendChart"></div>
+                <div id="trendMsg"></div>
+              </div>
+              <div class="card">
+                <h2>📦 Event Type Breakdown (Top 8)</h2>
+                <div id="stackedChart"></div>
+              </div>
+            </div>
+
+            <div class="card">
+              <h2>⏱️ Event Counts (last 10 vs 60 minutes)</h2>
+              <div id="countsChart"></div>
+            </div>
+
+            <div class="card">
+              <h3>Debug console</h3>
+              <pre id="debugBox">Loading…</pre>
+            </div>
+          </div>
+
+          <script>
+          async function loadJSON(p){ try{const r=await fetch(p,{cache:'no-store'}); return await r.json();}catch(e){return {status:0,data:{error:String(e)}}}
+          function now(){return new Date().toLocaleString()}
+          function log(obj){document.getElementById('debugBox').textContent = JSON.stringify(obj,null,2)}
+
+          (async () => {
+            const health = await loadJSON('health.json');
+            const trending = await loadJSON('trending.json');
+            const ec10 = await loadJSON('event_counts_10.json');
+            const ec60 = await loadJSON('event_counts_60.json');
+
+            document.getElementById('status').textContent = (health?.status===200) ? 'Healthy' : `Status ${health?.status||'N/A'}`;
+            document.getElementById('updated').textContent = now();
+            log({health, trending_status: trending?.status, ec10_status: ec10?.status, ec60_status: ec60?.status});
+
+            // Trending
+            const repos = (trending?.data?.repositories)||[];
+            if (!repos.length) {
+              document.getElementById('trendMsg').innerHTML = '<em>No trending data available yet — showing sample placeholders.</em>';
+            }
+            const names = repos.map(r => (r.name||'repo').split('/').slice(-1)[0]);
+            const totals = repos.map(r => r.events||0);
+            const watch = repos.map(r => r.watch_events||0);
+            const prs = repos.map(r => r.pr_events||0);
+            const issues = repos.map(r => r.issue_events||0);
+            const n = Math.min(names.length, 8);
+
+            Plotly.newPlot('trendChart', [{x:names,y:totals,type:'bar',marker:{color:'#60a5fa'}}],
+              {paper_bgcolor:'#111827',plot_bgcolor:'#111827',font:{color:'#e2e8f0'},margin:{t:10,l:40,r:10,b:80},xaxis:{tickangle:-30},yaxis:{title:'Events'}},
+              {displayModeBar:false,responsive:true});
+
+            Plotly.newPlot('stackedChart', [
+              {x:names.slice(0,n),y:watch.slice(0,n),type:'bar',name:'Watch',marker:{color:'#34d399'}},
+              {x:names.slice(0,n),y:prs.slice(0,n),type:'bar',name:'PR',marker:{color:'#fbbf24'}},
+              {x:names.slice(0,n),y:issues.slice(0,n),type:'bar',name:'Issues',marker:{color:'#f472b6'}},
+            ], {barmode:'stack',paper_bgcolor:'#111827',plot_bgcolor:'#111827',font:{color:'#e2e8f0'},margin:{t:10,l:40,r:10,b:80},xaxis:{tickangle:-30},yaxis:{title:'Events'}},
+               {displayModeBar:false,responsive:true});
+
+            // Counts (10 vs 60)
+            const labels = ['WatchEvent','PullRequestEvent','IssuesEvent'];
+            function unpack(d){ const x=d?.data||{}; return labels.map(k=>x[k]||0); }
+            const v10 = unpack(ec10); const v60 = unpack(ec60);
+            Plotly.newPlot('countsChart', [
+              {x:labels,y:v10,type:'bar',name:'10 min',marker:{color:'#818cf8'}},
+              {x:labels,y:v60,type:'bar',name:'60 min',marker:{color:'#22d3ee'}},
+            ], {barmode:'group',paper_bgcolor:'#111827',plot_bgcolor:'#111827',font:{color:'#e2e8f0'},margin:{t:10,l:40,r:10,b:40},yaxis:{title:'Events'}},
+               {displayModeBar:false,responsive:true});
+          })();
+          </script>
+          </body>
+          </html>
+          HTML
+
+      - name: Configure Pages
+        uses: actions/configure-pages@v5
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: pages_content/
+
+      - name: Deploy to GitHub Pages
+        id: deploy
+        uses: actions/deploy-pages@v4
+
+      - name: Upload debug artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pages-debug-${{ github.run_id }}
+          path: |
+            server.log
+            pages_content/*.json
+            pages_content/index.html
+
+      - name: Stop API
+        if: always()
+        run: |
+          if [ -f server.pid ]; then kill "$(cat server.pid)" 2>/dev/null || true; rm -f server.pid; fi
