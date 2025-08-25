@@ -103,4 +103,29 @@ Use MCP Inspector (`mcp dev src/github_events_monitor/mcp_server.py:main -e .`) 
 
 MIT
 
+## Assignment Mapping
+This project implements the specified assignment requirements as follows:
 
+- **Event Collection**: Streams WatchEvent, PullRequestEvent, and IssuesEvent from https://api.github.com/events. Implemented in `src/github_events_monitor/collector.py` with polling and SQLite storage.
+- **Metric: Average time between pull requests for a given repository**: Served via REST endpoint `GET /metrics/pr-interval?repo=owner/repo`. Calculates based on stored PullRequestEvent timestamps.
+- **Metric: Total number of events grouped by type for a given offset**: Served via REST endpoint `GET /metrics/event-counts?offset_minutes=X`. Counts events created in the last X minutes, grouped by type.
+- **Bonus: Visualization Endpoint**: Provides charts for metrics, e.g., `GET /visualization/trending-chart?hours=168&limit=10&format=png`.
+- **README and Diagram**: See below for how to run and assumptions. A C4 Level 1 diagram is in [diagram.md](diagram.md).
+
+## How to Run
+1. Clone the repo: `git clone https://github.com/sparesparrow/github-events.git`
+2. Install dependencies: `pip install -r requirements.txt`
+3. Copy `.env.example` to `.env` and fill in your values (especially GITHUB_TOKEN).
+4. Run the API: `python -m github_events_monitor.api`
+5. (Optional) Run MCP server: `python -m github_events_monitor.mcp_server`
+6. Access API at http://localhost:8000 (or configured port). Docs at /docs.
+
+## Assumptions
+- GitHub API rate limits are respected via POLL_INTERVAL (default 60s).
+- Public events only; no authentication required beyond token for higher limits.
+- SQLite for simplicity; assumes low-to-medium event volume.
+- Timezone handling: Uses UTC for all timestamps.
+- Offset in minutes for event counts; assumes server time for "now".
+- Visualization is basic (PNG/SVG); extendable for more formats.
+
+For architecture overview, see [diagram.md](diagram.md) with C4 Level 1 diagram.
