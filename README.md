@@ -25,33 +25,61 @@ The service can be configured via environment variables:
 - `DATABASE_PATH`: Path to SQLite database file
 - `POLL_INTERVAL`: Polling interval in seconds (default: 300)
 
-## Quickstart (REST API)
+## 🚀 Quick Start - Live Dashboard
 
-1) Python env
-- python -m venv .venv
-- source .venv/bin/activate
-- pip install -r requirements.txt
+### Option 1: One-Command Live Dashboard
+```bash
+./start-live-dashboard.sh
+```
+This script will:
+- Set up the environment
+- Start the API server 
+- Open the live dashboard in your browser
+- Show real-time GitHub Events data
 
-2) Run the REST API
-- export DATABASE_PATH="database/events.db"
-- export GITHUB_TOKEN="<optional PAT for higher rate limits>"
-- export TARGET_REPOSITORIES="owner/repo1,owner/repo2"   # optional
-- uvicorn github_events_monitor.api:app --host 0.0.0.0 --port 8000
+### Option 2: Manual Setup
 
-3) Collect events
-- POST http://localhost:8000/collect
-- Or let the background poller run (default every 5 minutes; change via POLL_INTERVAL)
+1) **Python Environment**
+```bash
+python -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+```
 
-4) Metrics endpoints
-- GET /metrics/event-counts?offset_minutes=60
-- GET /metrics/pr-interval?repo=owner/repo
-- GET /metrics/repository-activity?repo=owner/repo&hours=24
-- GET /metrics/trending?hours=24&limit=10
+2) **Start API Server**
+```bash
+export GITHUB_TOKEN="your_github_token"  # optional, for higher rate limits
+export CORS_ORIGINS="*"  # enable CORS for dashboard
+python -m src.github_events_monitor.api
+```
 
-5) Visualization (bonus)
-- GET /visualization/trending-chart?hours=24&limit=5&format=png
+3) **Open Live Dashboard**
+- Open `docs/index.html` in your browser
+- Dashboard automatically connects to `http://localhost:8000`
+- **Real-time data** refreshes every 30 seconds
+- Fallback to static files if API unavailable
 
-Interactive docs: open http://localhost:8000/docs
+### 📊 Dashboard Features
+- **🔴 Live API Data**: Real-time metrics from running API server
+- **📁 Static Fallback**: Works with pre-generated JSON files  
+- **🔧 Configurable**: Edit `docs/config.js` to change API endpoints
+- **📱 Responsive**: Mobile-friendly design with interactive charts
+- **🔄 Auto-refresh**: Live updates every 30 seconds
+- **🐛 Debug Console**: Real-time connection and data status
+
+### 🌐 API Endpoints
+- **Health**: `GET /health`
+- **Event Counts**: `GET /metrics/event-counts?offset_minutes=60`
+- **PR Intervals**: `GET /metrics/pr-interval?repo=owner/repo`
+- **Repository Activity**: `GET /metrics/repository-activity?repo=owner/repo&hours=24`
+- **Trending Repos**: `GET /metrics/trending?hours=24&limit=10`
+- **Visualization**: `GET /visualization/trending-chart?hours=24&limit=5&format=png`
+- **Interactive API Docs**: `http://localhost:8000/docs`
+
+### 📈 Live Dashboard URLs
+- **Local Dashboard**: `file://path/to/docs/index.html`
+- **GitHub Pages**: [https://sparesparrow.github.io/github-events](https://sparesparrow.github.io/github-events)
+- **API Server**: `http://localhost:8000`
 
 ## Setup (Monitor and Dashboard)
 

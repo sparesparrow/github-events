@@ -3,10 +3,11 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>🚀 GitHub Events Monitor — Dashboard</title>
+    <title>🚀 GitHub Events Monitor — Live Dashboard</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="config.js"></script>
     <style>
         body {
             background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
@@ -52,6 +53,8 @@
         }
         .status-live { background: #10b981; color: white; }
         .status-loading { background: #f59e0b; color: white; }
+        .status-error { background: #ef4444; color: white; }
+        .status-fallback { background: #6b7280; color: white; }
         .repo-table {
             border-radius: 15px;
             overflow: hidden;
@@ -102,6 +105,23 @@
             0% { transform: rotate(0deg); }
             100% { transform: rotate(360deg); }
         }
+        .api-config {
+            background: #f8fafc;
+            border-radius: 10px;
+            padding: 15px;
+            margin-bottom: 20px;
+            border-left: 4px solid #6366f1;
+        }
+        .data-source-indicator {
+            font-size: 0.85rem;
+            margin-top: 5px;
+            padding: 4px 8px;
+            border-radius: 4px;
+            display: inline-block;
+        }
+        .source-api { background: #dcfce7; color: #166534; }
+        .source-static { background: #fef3c7; color: #92400e; }
+        .source-error { background: #fecaca; color: #991b1b; }
     </style>
 </head>
 <body>
@@ -111,11 +131,31 @@
             <h1 class="header-title mb-3">🚀 GitHub Events Monitor</h1>
             <div id="status-container">
                 <span id="status-badge" class="status-badge status-loading">
-                    <span class="loading-spinner me-2"></span>Loading...
+                    <span class="loading-spinner me-2"></span>Connecting to live API...
                 </span>
             </div>
             <div class="mt-2">
-                <small class="text-muted" id="last-updated">Updated: Loading...</small>
+                <small class="text-muted" id="last-updated">Updated: Connecting...</small>
+            </div>
+
+            <!-- API Configuration -->
+            <div class="api-config mt-4">
+                <h6><i class="fas fa-cog me-2"></i>Data Source Configuration</h6>
+                <div class="row">
+                    <div class="col-md-6">
+                        <label for="api-url" class="form-label">API Base URL:</label>
+                        <input type="text" id="api-url" class="form-control" value="" placeholder="http://localhost:8000">
+                    </div>
+                    <div class="col-md-6 d-flex align-items-end">
+                        <button id="test-connection" class="btn btn-primary me-2">
+                            <i class="fas fa-link me-1"></i>Test Connection
+                        </button>
+                        <button id="refresh-data" class="btn btn-success">
+                            <i class="fas fa-sync me-1"></i>Refresh Data
+                        </button>
+                    </div>
+                </div>
+                <div id="connection-status" class="mt-2"></div>
             </div>
         </div>
 
@@ -124,25 +164,29 @@
             <div class="col-md-3">
                 <div class="metric-card">
                     <div class="metric-number" id="total-events">--</div>
-                    <div class="metric-label"><i class="fas fa-chart-line me-2"></i>Total Events</div>
+                    <div class="metric-label"><i class="fas fa-chart-line me-2"></i>Total Events (60min)</div>
+                    <div class="data-source-indicator source-api" id="total-source">Live API</div>
                 </div>
             </div>
             <div class="col-md-3">
                 <div class="metric-card events-card">
                     <div class="metric-number" id="issue-events">--</div>
                     <div class="metric-label"><i class="fas fa-exclamation-circle me-2"></i>Issues Events</div>
+                    <div class="data-source-indicator source-api" id="issue-source">Live API</div>
                 </div>
             </div>
             <div class="col-md-3">
                 <div class="metric-card pr-card">
                     <div class="metric-number" id="pr-events">--</div>
                     <div class="metric-label"><i class="fas fa-code-branch me-2"></i>Pull Requests</div>
+                    <div class="data-source-indicator source-api" id="pr-source">Live API</div>
                 </div>
             </div>
             <div class="col-md-3">
                 <div class="metric-card watch-card">
                     <div class="metric-number" id="watch-events">--</div>
                     <div class="metric-label"><i class="fas fa-eye me-2"></i>Watch Events</div>
+                    <div class="data-source-indicator source-api" id="watch-source">Live API</div>
                 </div>
             </div>
         </div>
@@ -151,30 +195,30 @@
         <div class="row">
             <div class="col-md-6">
                 <div class="chart-container">
-                    <h5 class="mb-4"><i class="fas fa-fire me-2"></i>Event Distribution</h5>
+                    <h5 class="mb-4">
+                        <i class="fas fa-fire me-2"></i>Event Distribution (60min)
+                        <span class="data-source-indicator source-api" id="chart1-source">Live API</span>
+                    </h5>
                     <canvas id="eventChart" width="400" height="200"></canvas>
                 </div>
             </div>
             <div class="col-md-6">
                 <div class="chart-container">
-                    <h5 class="mb-4"><i class="fas fa-clock me-2"></i>Event Timeline (10 vs 60 min)</h5>
+                    <h5 class="mb-4">
+                        <i class="fas fa-clock me-2"></i>Event Timeline (10 vs 60 min)
+                        <span class="data-source-indicator source-api" id="chart2-source">Live API</span>
+                    </h5>
                     <canvas id="timelineChart" width="400" height="200"></canvas>
                 </div>
             </div>
         </div>
 
-        <!-- Target Repositories Section -->
-        <div class="chart-container">
-            <h5 class="mb-4"><i class="fas fa-bullseye me-2"></i>Target Repositories</h5>
-            <div id="target-repos-info" class="alert alert-info">
-                <i class="fas fa-info-circle me-2"></i>
-                Monitoring public GitHub events. Configure TARGET_REPOSITORIES environment variable to focus on specific repositories.
-            </div>
-        </div>
-
         <!-- Trending Repositories -->
         <div class="chart-container">
-            <h5 class="mb-4"><i class="fas fa-trophy me-2"></i>🔥 Trending Repositories (24h)</h5>
+            <h5 class="mb-4">
+                <i class="fas fa-trophy me-2"></i>🔥 Trending Repositories (24h)
+                <span class="data-source-indicator source-api" id="trending-source">Live API</span>
+            </h5>
             <div class="table-responsive">
                 <table class="table repo-table">
                     <thead>
@@ -184,13 +228,13 @@
                             <th><i class="fas fa-eye me-2"></i>Watches</th>
                             <th><i class="fas fa-code-branch me-2"></i>PRs</th>
                             <th><i class="fas fa-exclamation-circle me-2"></i>Issues</th>
-                            <th><i class="fas fa-clock me-2"></i>Activity</th>
+                            <th><i class="fas fa-clock me-2"></i>Last Activity</th>
                         </tr>
                     </thead>
                     <tbody id="repos-tbody">
                         <tr>
                             <td colspan="6" class="text-center">
-                                <span class="loading-spinner me-2"></span>Loading repositories...
+                                <span class="loading-spinner me-2"></span>Connecting to live API...
                             </td>
                         </tr>
                     </tbody>
@@ -198,63 +242,226 @@
             </div>
         </div>
 
-        <!-- Debug Info -->
+        <!-- Debug Console -->
         <div class="chart-container">
-            <h6 class="mb-3"><i class="fas fa-cog me-2"></i>Debug Console</h6>
-            <div id="debug-console" class="bg-light p-3 rounded" style="font-family: monospace; font-size: 0.9rem;">
-                Initializing dashboard...
+            <h6 class="mb-3"><i class="fas fa-terminal me-2"></i>Live API Debug Console</h6>
+            <div id="debug-console" class="bg-light p-3 rounded" style="font-family: monospace; font-size: 0.9rem; max-height: 300px; overflow-y: auto;">
+                🔄 Initializing live dashboard connection...
             </div>
         </div>
     </div>
 
     <script>
         let eventChart, timelineChart;
+        let apiBaseUrl = '';
+        let useStaticFallback = false;
+        let currentApiIndex = 0;
 
-        async function loadDashboardData() {
+        // Load configuration (with fallback if config.js doesn't load)
+        const CONFIG = window.GITHUB_EVENTS_CONFIG || {
+            API: {
+                BASE_URL: 'http://localhost:8000',
+                ALTERNATIVE_URLS: [],
+                ENDPOINTS: {
+                    health: '/health',
+                    eventCounts60: '/metrics/event-counts?offset_minutes=60',
+                    eventCounts10: '/metrics/event-counts?offset_minutes=10',
+                    trending: '/metrics/trending?hours=24&limit=20'
+                }
+            },
+            STATIC_FALLBACK: {
+                enabled: true,
+                files: {
+                    eventCounts60: 'event_counts_60.json',
+                    eventCounts10: 'event_counts_10.json',
+                    trending: 'trending.json',
+                    data: 'data.json'
+                }
+            },
+            DASHBOARD: {
+                REFRESH_INTERVAL: 30000,
+                TIMEOUT: 5000,
+                MAX_TRENDING_REPOS: 10,
+                DEBUG: true
+            }
+        };
+
+        function log(message) {
+            if (!CONFIG.DASHBOARD.DEBUG) return;
             const debugEl = document.getElementById('debug-console');
+            const timestamp = new Date().toLocaleTimeString();
+            debugEl.innerHTML += `\n[${timestamp}] ${message}`;
+            debugEl.scrollTop = debugEl.scrollHeight;
+        }
+
+        function getApiUrls() {
+            const urls = [CONFIG.API.BASE_URL];
+            if (CONFIG.API.ALTERNATIVE_URLS) {
+                urls.push(...CONFIG.API.ALTERNATIVE_URLS);
+            }
+            return urls.filter(url => url && url.trim());
+        }
+
+        function updateSourceIndicator(elementId, source) {
+            const el = document.getElementById(elementId);
+            if (el) {
+                el.className = `data-source-indicator source-${source}`;
+                el.textContent = source === 'api' ? 'Live API' : source === 'static' ? 'Static File' : 'Error';
+            }
+        }
+
+        async function testApiConnection() {
+            const apiUrl = document.getElementById('api-url').value;
+            const statusEl = document.getElementById('connection-status');
             
             try {
-                debugEl.innerHTML = 'Fetching dashboard data...';
+                log(`🔍 Testing API connection to ${apiUrl}...`);
+                const response = await fetch(`${apiUrl}/health`, {
+                    method: 'GET',
+                    mode: 'cors',
+                    headers: {
+                        'Accept': 'application/json',
+                    }
+                });
                 
-                // Load main dashboard data
-                const dataRes = await fetch('data.json?' + new Date().getTime(), { cache: 'no-store' });
-                const data = await dataRes.json();
+                if (response.ok) {
+                    const health = await response.json();
+                    statusEl.innerHTML = `<div class="alert alert-success"><i class="fas fa-check-circle me-2"></i>✅ API Connected - ${health.status}</div>`;
+                    log(`✅ API health check successful: ${JSON.stringify(health)}`);
+                    apiBaseUrl = apiUrl;
+                    useStaticFallback = false;
+                    return true;
+                } else {
+                    throw new Error(`HTTP ${response.status}`);
+                }
+            } catch (error) {
+                statusEl.innerHTML = `<div class="alert alert-warning"><i class="fas fa-exclamation-triangle me-2"></i>⚠️ API unavailable: ${error.message}. Using static fallback.</div>`;
+                log(`❌ API connection failed: ${error.message}`);
+                useStaticFallback = true;
+                return false;
+            }
+        }
+
+        async function fetchFromApi(endpoint) {
+            try {
+                const url = `${apiBaseUrl}${endpoint}`;
+                log(`📡 Fetching from API: ${url}`);
                 
-                // Load additional data files
-                const [counts10Res, counts60Res, trendingRes, statusRes] = await Promise.all([
-                    fetch('event_counts_10.json?' + new Date().getTime()),
-                    fetch('event_counts_60.json?' + new Date().getTime()),
-                    fetch('trending.json?' + new Date().getTime()),
-                    fetch('data_status.json?' + new Date().getTime())
+                const response = await fetch(url, {
+                    method: 'GET',
+                    mode: 'cors',
+                    headers: {
+                        'Accept': 'application/json',
+                    }
+                });
+                
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}`);
+                }
+                
+                const data = await response.json();
+                log(`✅ API response received: ${JSON.stringify(data).substring(0, 100)}...`);
+                return { data, source: 'api' };
+            } catch (error) {
+                log(`❌ API fetch failed for ${endpoint}: ${error.message}`);
+                throw error;
+            }
+        }
+
+        async function fetchFromStatic(filename) {
+            try {
+                log(`📄 Falling back to static file: ${filename}`);
+                const response = await fetch(`${filename}?${new Date().getTime()}`, { cache: 'no-store' });
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}`);
+                }
+                const data = await response.json();
+                log(`✅ Static file loaded: ${filename}`);
+                return { data, source: 'static' };
+            } catch (error) {
+                log(`❌ Static file fetch failed for ${filename}: ${error.message}`);
+                throw error;
+            }
+        }
+
+        async function fetchData(endpointKey, staticFileKey) {
+            const apiEndpoint = CONFIG.API.ENDPOINTS[endpointKey];
+            const staticFile = CONFIG.STATIC_FALLBACK.files[staticFileKey];
+
+            if (!useStaticFallback) {
+                try {
+                    return await fetchFromApi(apiEndpoint);
+                } catch (error) {
+                    log(`🔄 API failed, trying static fallback...`);
+                    if (CONFIG.STATIC_FALLBACK.enabled) {
+                        useStaticFallback = true;
+                    } else {
+                        throw error;
+                    }
+                }
+            }
+            
+            if (CONFIG.STATIC_FALLBACK.enabled && staticFile) {
+                return await fetchFromStatic(staticFile);
+            } else {
+                throw new Error('No fallback available and API failed');
+            }
+        }
+
+        async function loadDashboardData() {
+            try {
+                log(`🔄 Starting dashboard data refresh...`);
+                document.getElementById('status-badge').innerHTML = '<span class="loading-spinner me-2"></span>Loading live data...';
+                document.getElementById('status-badge').className = 'status-badge status-loading';
+
+                // Test API connection first
+                const apiConnected = await testApiConnection();
+
+                // Fetch all required data
+                const [eventCounts60Result, eventCounts10Result, trendingResult] = await Promise.all([
+                    fetchData('eventCounts60', 'eventCounts60'),
+                    fetchData('eventCounts10', 'eventCounts10'),
+                    fetchData('trending', 'trending')
                 ]);
 
-                const counts10 = await counts10Res.json();
-                const counts60 = await counts60Res.json();
-                const trending = await trendingRes.json();
-                const status = await statusRes.json();
+                // Update source indicators
+                updateSourceIndicator('total-source', eventCounts60Result.source);
+                updateSourceIndicator('issue-source', eventCounts60Result.source);
+                updateSourceIndicator('pr-source', eventCounts60Result.source);
+                updateSourceIndicator('watch-source', eventCounts60Result.source);
+                updateSourceIndicator('chart1-source', eventCounts60Result.source);
+                updateSourceIndicator('chart2-source', eventCounts10Result.source);
+                updateSourceIndicator('trending-source', trendingResult.source);
 
-                debugEl.innerHTML = `✅ Data loaded successfully
-📊 Events (60min): ${JSON.stringify(counts60)}
-🔥 Trending repos: ${trending.data.repositories.length}
-📍 Status: ${status.health_status}
-🕒 Generated: ${status.generated_at}`;
+                // Extract data
+                const counts60 = eventCounts60Result.data;
+                const counts10 = eventCounts10Result.data;
+                const trending = trendingResult.data.repositories || trendingResult.data;
 
-                renderDashboard(data, counts10, counts60, trending, status);
-                
+                log(`📊 Data loaded - 60min: ${JSON.stringify(counts60)}, Trending repos: ${trending.length}`);
+
+                // Render dashboard
+                renderDashboard(counts60, counts10, trending);
+
+                // Update status
+                const isLive = !useStaticFallback;
+                document.getElementById('status-badge').innerHTML = isLive ? 
+                    '<i class="fas fa-wifi me-2"></i>Live API Connected' : 
+                    '<i class="fas fa-file me-2"></i>Static Data Mode';
+                document.getElementById('status-badge').className = `status-badge ${isLive ? 'status-live' : 'status-fallback'}`;
+                document.getElementById('last-updated').textContent = `Updated: ${new Date().toLocaleString()} ${isLive ? '(Live)' : '(Static)'}`;
+
+                log(`✅ Dashboard refresh complete!`);
+
             } catch (error) {
-                debugEl.innerHTML = `❌ Error loading data: ${error.message}`;
+                log(`❌ Dashboard load failed: ${error.message}`);
                 document.getElementById('status-badge').innerHTML = '<i class="fas fa-exclamation-triangle me-2"></i>Error';
-                document.getElementById('status-badge').className = 'status-badge bg-danger text-white';
+                document.getElementById('status-badge').className = 'status-badge status-error';
                 console.error('Dashboard error:', error);
             }
         }
 
-        function renderDashboard(data, counts10, counts60, trending, status) {
-            // Update status
-            document.getElementById('status-badge').innerHTML = '<i class="fas fa-check-circle me-2"></i>Live';
-            document.getElementById('status-badge').className = 'status-badge status-live';
-            document.getElementById('last-updated').textContent = `Updated: ${new Date(data.last_updated).toLocaleString()}`;
-
+        function renderDashboard(counts60, counts10, trending) {
             // Calculate totals
             const total60 = Object.values(counts60).reduce((a, b) => a + b, 0);
             const total10 = Object.values(counts10).reduce((a, b) => a + b, 0);
@@ -320,30 +527,53 @@
 
             // Render repositories table
             const tbody = document.getElementById('repos-tbody');
-            tbody.innerHTML = trending.data.repositories.slice(0, 10).map((repo, index) => `
+            tbody.innerHTML = trending.slice(0, 10).map((repo, index) => `
                 <tr>
                     <td class="repo-name">
                         <span class="badge bg-primary me-2">${index + 1}</span>
                         ${repo.repo_name}
                     </td>
                     <td><strong>${repo.total_events}</strong></td>
-                    <td>${repo.watch_events}</td>
-                    <td>${repo.pr_events}</td>
-                    <td>${repo.issue_events}</td>
+                    <td>${repo.watch_events || repo.watches || 0}</td>
+                    <td>${repo.pr_events || repo.pull_requests || 0}</td>
+                    <td>${repo.issue_events || repo.issues || 0}</td>
                     <td>
-                        <div class="progress" style="height: 8px;">
-                            <div class="progress-bar bg-success" style="width: ${Math.min(100, (repo.total_events / Math.max(...trending.data.repositories.map(r => r.total_events))) * 100)}%"></div>
-                        </div>
+                        <small class="text-muted">
+                            ${repo.last_event ? new Date(repo.last_event).toLocaleTimeString() : 'N/A'}
+                        </small>
                     </td>
                 </tr>
             `).join('');
         }
 
+        // Event listeners
+        document.getElementById('test-connection').addEventListener('click', () => {
+            testApiConnection();
+        });
+
+        document.getElementById('refresh-data').addEventListener('click', () => {
+            loadDashboardData();
+        });
+
+        document.getElementById('api-url').addEventListener('change', (e) => {
+            apiBaseUrl = e.target.value;
+            useStaticFallback = false;
+        });
+
         // Initialize dashboard
-        document.addEventListener('DOMContentLoaded', loadDashboardData);
+        document.addEventListener('DOMContentLoaded', () => {
+            log('🚀 Dashboard initialized');
+            
+            // Set initial API URL from configuration
+            apiBaseUrl = CONFIG.API.BASE_URL;
+            document.getElementById('api-url').value = apiBaseUrl;
+            
+            log(`📋 Configuration loaded: API=${apiBaseUrl}, Fallback=${CONFIG.STATIC_FALLBACK.enabled}`);
+            loadDashboardData();
+        });
         
-        // Auto-refresh every 5 minutes
-        setInterval(loadDashboardData, 5 * 60 * 1000);
+        // Auto-refresh live data using configured interval
+        setInterval(loadDashboardData, CONFIG.DASHBOARD.REFRESH_INTERVAL);
     </script>
 </body>
 </html>
