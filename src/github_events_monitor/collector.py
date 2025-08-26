@@ -544,6 +544,53 @@ class GitHubEventsCollector:
 			series = [{"bucket_start": b, "total": t} for b, t in rows]
 			return series
 	
+	async def get_pr_timeline(self, repo_name: str, days: int = 7) -> List[Dict[str, Any]]:
+		"""
+		Return per-day counts of 'opened' PullRequestEvent for a repository over the
+		last N days. Returns a list of dicts: [{"date": "YYYY-MM-DD", "count": n}],
+		including days with zero activity, ordered by date ascending.
+		"""
+		if days <= 0:
+			days = 1
+		from datetime import timedelta
+		now_utc = datetime.now(timezone.utc)
+		cutoff_time = now_utc - timedelta(days=days)
+		
+		# Build zero-filled buckets for each day in the window
+		buckets: Dict[str, int] = {}
+		for i in range(days + 1):
+			day = (cutoff_time + timedelta(days=i)).date().isoformat()
+			buckets[day] = 0
+		
+		async with aiosqlite.connect(self.db_path) as db:
+			cursor = await db.execute(
+				"""
+				SELECT created_at, payload
+				FROM events
+				WHERE repo_name = ?
+				  AND event_type = 'PullRequestEvent'
+				  AND created_at >= ?
+				ORDER BY created_at ASC
+				""",
+				(repo_name, cutoff_time),
+			)
+			rows = await cursor.fetchall()
+			for created_at_str, payload_str in rows:
+				try:
+					created_at = datetime.fromisoformat(str(created_at_str).replace('Z', '+00:00'))
+					payload = json.loads(payload_str)
+					if payload.get('action') == 'opened':
+						day_key = created_at.date().isoformat()
+						if day_key in buckets:
+							buckets[day_key] += 1
+				except Exception:
+					# Skip malformed rows gracefully
+					continue
+		
+		# Convert to sorted series
+		series = [{"date": day, "count": buckets[day]} for day in sorted(buckets.keys())]
+		return series
+	
 	async def collect_and_store(self, limit: Optional[int] = None) -> int:
 		"""
 		Complete workflow: fetch events from API and store them

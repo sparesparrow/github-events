@@ -356,14 +356,49 @@ async def get_pr_timeline_chart(
 	collector: GitHubEventsCollector = Depends(get_collector_instance)
 ):
 	"""
-	Generate a timeline visualization of pull request activity for a repository.
-	
-	Additional bonus visualization showing PR activity over time.
+	Generate a timeline visualization of pull request 'opened' events per day.
+	Returns an image (png/svg). 404 if no data in the given window.
 	"""
 	try:
-		# This would require extending the collector to get time-series data
-		# For now, return a simple message
-		return {"message": "PR timeline visualization endpoint", "repo": repo, "days": days}
+		series = await collector.get_pr_timeline(repo, days)
+		if not series or sum(item["count"] for item in series) == 0:
+			raise HTTPException(status_code=404, detail="No PR openings found for the specified period")
+
+		# Prepare data
+		dates = [item["date"] for item in series]
+		counts = [item["count"] for item in series]
+
+		# Plot
+		plt.style.use('default')
+		fig, ax = plt.subplots(figsize=(12, 6))
+		ax.plot(dates, counts, marker='o', color='steelblue', linewidth=2)
+		ax.fill_between(dates, counts, color='steelblue', alpha=0.15)
+		ax.set_xlabel('Date')
+		ax.set_ylabel('PRs opened')
+		ax.set_title(f"PR openings per day for {repo} (last {days} days)")
+		ax.grid(axis='y', alpha=0.3)
+		plt.xticks(rotation=45, ha='right')
+		plt.tight_layout()
+
+		# Encode image
+		img_buffer = io.BytesIO()
+		if format == "svg":
+			plt.savefig(img_buffer, format='svg', bbox_inches='tight', dpi=150)
+			media_type = "image/svg+xml"
+		else:
+			plt.savefig(img_buffer, format='png', bbox_inches='tight', dpi=150)
+			media_type = "image/png"
+		plt.close()
+		img_buffer.seek(0)
+
+		from fastapi.responses import StreamingResponse
+		return StreamingResponse(
+			io.BytesIO(img_buffer.read()),
+			media_type=media_type,
+			headers={"Content-Disposition": f"inline; filename=pr_timeline.{format}"}
+		)
+	except HTTPException:
+		raise
 	except Exception as e:
 		raise HTTPException(status_code=500, detail=str(e))
 
