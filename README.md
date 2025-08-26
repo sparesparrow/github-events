@@ -1002,15 +1002,15 @@ HealthReporter ..> DBConnection : optional ping
 - sqlite3 database/events.db < database/schema.sql
 
 3) Run Event Monitor
-- python service/github_monitor.py            # continuous
-- python service/github_monitor.py --once     # single cycle (useful in CI)
+- python scripts/github_monitor.py            # continuous
+- python scripts/github_monitor.py --once     # single cycle (useful in CI)
 Optional: export GITHUB_TOKEN for higher limits.
 
 4) Export Dashboard Data
-- python service/data_exporter.py
+- python scripts/data_exporter.py
 
 5) MCP Server
-- python mcp/server.py
+- python scripts/mcp_server_cli.py
 
 ## Docker Deployment
 
