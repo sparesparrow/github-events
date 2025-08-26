@@ -2,7 +2,9 @@ version: '3.9'
 
 services:
   github-events-api:
-    build: .
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
     ports:
       - "${HOST_PORT:-8000}:${API_PORT:-8000}"
     environment:
