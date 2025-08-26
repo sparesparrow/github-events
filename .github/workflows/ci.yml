@@ -6,6 +6,11 @@ on:
   pull_request:
     branches: [ main ]
   workflow_dispatch:
+    inputs:
+      repositories:
+        description: "Comma-separated repos (owner/repo) to visualize"
+        required: false
+        default: ""
 
 env:
   PYTHON_VERSION: '3.11'
@@ -88,6 +93,7 @@ jobs:
           PYTHONPATH: ${{ github.workspace }}/src
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           DATABASE_PATH: ./pages_demo.db
+          TARGET_REPOSITORIES: ${{ github.event.inputs.repositories != '' && github.event.inputs.repositories || 'sparesparrow/github-events,sparesparrow/mcp-prompts' }}
         run: |
           python -m github_events_monitor.api > server.log 2>&1 &
           echo $! > server.pid
@@ -103,6 +109,16 @@ jobs:
               echo "❌ Health check timed out"; tail -n 200 server.log; exit 1
             fi
           done
+
+      - name: Collect events from target repositories
+        env:
+          BASE_URL: http://127.0.0.1:8000
+        run: |
+          echo "🔍 Collecting events from target repositories..."
+          curl -X POST "http://127.0.0.1:8000/collect?limit=100" -H "Content-Type: application/json"
+          echo "✅ Collection initiated"
+          echo "⏳ Waiting for data processing..."
+          sleep 10
 
       - name: Export API JSON for dashboard
         env:
@@ -169,6 +185,17 @@ jobs:
           with open("pages_content/trending.json","w") as f: 
             json.dump(trending_data, f, indent=2)
           files_written.append("trending.json")
+
+          # Write config with the repositories used for this run
+          config = {
+            "target_repositories": os.getenv("TARGET_REPOSITORIES", "").split(",") if os.getenv("TARGET_REPOSITORIES") else [],
+            "repo_slug": os.getenv("GITHUB_REPOSITORY", ""),
+            "run_id": os.getenv("GITHUB_RUN_ID", ""),
+            "workflow": os.getenv("GITHUB_WORKFLOW", "")
+          }
+          with open("pages_content/config.json","w") as f:
+            json.dump(config, f, indent=2)
+          files_written.append("config.json")
 
           status_data = {
             "base_url": base,
@@ -240,8 +267,19 @@ jobs:
                 <span class="pill"><a href="trending.json" target="_blank">trending.json</a></span>
                 <span class="pill"><a href="event_counts_10.json" target="_blank">event_counts_10.json</a></span>
                 <span class="pill"><a href="event_counts_60.json" target="_blank">event_counts_60.json</a></span>
+                <span class="pill"><a href="config.json" target="_blank">config.json</a></span>
               </div>
-              <p>Charts below are built from JSON exported during CI and deployed here. Real GitHub Events API data from the last successful workflow run.</p>
+              <p id="selectedRepos">Loading repositories…</p>
+            </div>
+
+            <div class="card">
+              <h2>🎯 Target Repositories</h2>
+              <div id="repoList">Loading…</div>
+              <p>
+                Want to visualize different repos? 
+                <a id="openRequest" href="#" target="_blank">Open a request</a>
+                to trigger a new dashboard build.
+              </p>
             </div>
 
             <div class="grid">
@@ -294,13 +332,28 @@ jobs:
 
           (async () => {
             const health = await loadJSON('health.json');
+            const config = await loadJSON('config.json');
             const trending = await loadJSON('trending.json');
             const ec10 = await loadJSON('event_counts_10.json');
             const ec60 = await loadJSON('event_counts_60.json');
 
             document.getElementById('status').textContent = (health?.status===200) ? 'Healthy' : `Status ${health?.status||'N/A'}`;
             document.getElementById('updated').textContent = now();
-            log({health, trending_status: trending?.status, ec10_status: ec10?.status, ec60_status: ec60?.status});
+            log({health, config, trending_status: trending?.status, ec10_status: ec10?.status, ec60_status: ec60?.status});
+
+            // Show selected repositories
+            const repos = (config && Array.isArray(config.target_repositories)) ? config.target_repositories.filter(Boolean) : [];
+            const repoText = repos.length ? `Monitoring: ${repos.join(', ')}` : 'Monitoring: public events (no repositories specified)';
+            document.getElementById('selectedRepos').textContent = repoText;
+            const repoListDiv = document.getElementById('repoList');
+            repoListDiv.innerHTML = repos.length ? `<ul>${repos.map(r=>`<li>${r}</li>`).join('')}</ul>` : '<em>No specific repositories provided. Using public events.</em>';
+
+            // Prefilled issue link to request a new build
+            const repoSlug = (config && config.repo_slug) ? config.repo_slug : '';
+            const bodyVal = repos.length ? `repos=${repos.join(',')}` : 'repos=owner/repo1,owner/repo2';
+            const defaultBody = encodeURIComponent(bodyVal);
+            const issueUrl = repoSlug ? `https://github.com/${repoSlug}/issues/new?title=Dashboard%20Request&labels=dashboard-request&body=${defaultBody}` : '#';
+            document.getElementById('openRequest').href = issueUrl;
 
             // Check for fetch errors
             const errors = [];

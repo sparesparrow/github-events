@@ -1,37 +1,6 @@
 {
-    "schemaVersion": "1.0",
-    "version": "1.0.0",
-    "metadata": {
-      "project": "github-events-monitor",
-      "description": "MCP server configurations for GitHub Events Monitor",
-      "updated": "2025-08-26"
-    },
     "mcpServers": {
-      "github-events-monitor": {
-        "command": "github-events-monitor-mcp", 
-        "args": [],
-        "env": {
-          "GITHUB_TOKEN": "${{GITHUB_TOKEN}}",
-          "MCP_TRANSPORT": "stdio",
-          "DATABASE_PATH": "/home/sparrow/mcp/github-events-clone/github_events.db",
-          "POLL_INTERVAL": "300",
-          "API_BASE_URL": "http://127.0.0.1:8001"
-        },
-        "description": "GitHub Events Monitor MCP Server via uv package installation"
-      },
-      "github-events-monitor-pip": {
-        "command": "github-events-monitor-mcp",
-        "args": [],
-        "env": {
-          "GITHUB_TOKEN": "${{GITHUB_TOKEN}}",
-          "DATABASE_PATH": "/home/sparrow/mcp/github-events-clone/github_events.db",
-          "POLL_INTERVAL": "300",
-          "MCP_TRANSPORT": "stdio",
-          "API_BASE_URL": "http://127.0.0.1:8001"
-        },
-        "description": "GitHub Events Monitor MCP Server via pip package installation"
-      },
-      "github-events-monitor-docker": {
+      "github-events-docker": {
         "command": "docker",
         "args": [
           "run",
@@ -42,73 +11,21 @@
           "-e", "MCP_MODE=true",
           "-e", "DATABASE_PATH=/app/data/github_events.db",
           "-e", "POLL_INTERVAL=300",
-          "-e", "API_BASE_URL=http://host.docker.internal:8001",
+          "-e", "API_BASE_URL=http://host.docker.internal:8000",
           "-v", "/home/sparrow/mcp/data/github-events:/app/data",
-          "--name", "mcp-github-events-monitor-container",
-          "sparesparrow/github-events-monitor:1.0.0"
+          "--name", "mcp-github-events-container",
+          "sparesparrow/github-events"
         ],
         "description": "GitHub Events Monitor MCP Server via Docker container with persistent storage"
       },
-      "github-events-monitor-rest": {
-        "command": "docker",
+      "postgres": {
+        "command": "npx",
         "args": [
-          "run",
-          "-d",
-          "--name", "github-events-monitor-rest",
-          "-p", "8000:8000",
-          "-e", "GITHUB_TOKEN=${{GITHUB_PERSONAL_ACCESS_TOKEN}}",
-          "-e", "API_PORT=8000",
-          "-e", "POLL_INTERVAL=300",
-          "-v", "/home/sparrow/mcp/data/github-events:/app/data",
-          "--restart", "unless-stopped",
-          "sparesparrow/github-events-monitor:1.0.0"
+          "-y",
+          "@modelcontextprotocol/server-postgres",
+          "${{POSTGRES_URL_READONLY}}"
         ],
-        "description": "GitHub Events Monitor REST API server via Docker"
-      },
-    "github-events-monitor-production": {
-      "command": "docker",
-      "args": [
-        "run",
-        "-d",
-        "--name", "github-events-monitor-production",
-        "-p", "8000:8000",
-        "-e", "GITHUB_TOKEN=${{GITHUB_PERSONAL_ACCESS_TOKEN}}",
-        "-e", "API_PORT=8000",
-        "-e", "POLL_INTERVAL=300",
-        "-e", "LOG_LEVEL=INFO",
-        "-v", "/opt/github-events:/app/data",
-        "--restart", "unless-stopped",
-        "--memory=512m",
-        "--cpus=1.0",
-        "sparesparrow/github-events-monitor:1.0.0"
-      ],
-      "description": "Production GitHub Events Monitor with resource limits and persistent storage"
-    }
-  },
-  "monitoring": {
-    "healthCheck": {
-      "url": "http://localhost:8000/health",
-      "interval": "30s",
-      "timeout": "10s"
-    },
-    "metrics": {
-      "eventCounts": "http://localhost:8000/metrics/event-counts?offset_minutes=60",
-      "trending": "http://localhost:8000/metrics/trending?hours=24&limit=10"
-    }
-  },
-    "restEndpoints": {
-      "github-events-api": {
-        "baseUrl": "http://localhost:8000",
-        "endpoints": {
-          "health": "/health",
-          "event-counts": "/metrics/event-counts",
-          "pr-interval": "/metrics/pr-interval",
-          "repository-activity": "/metrics/repository-activity",
-          "trending": "/metrics/trending",
-          "visualization-chart": "/visualization/trending-chart",
-          "collect": "/collect"
-        },
-        "description": "REST API endpoints for GitHub Events Monitor"
+        "description": "MCP PostgreSQL server (read-only). Set POSTGRES_URL_READONLY like postgresql://user:pass@host:5432/db"
       }
     }
   }

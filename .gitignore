@@ -7,6 +7,16 @@ __pycache__/
 *.egg-info/
 build/
 dist/
+.venv/
+server.log
+server.pid
+pages_content/
+logs/*
+*.db
+*.db-journal
+*.sqlite
+# Local runtime exports
+pages_demo.db
 .envrc
 # Keep DB tracked for demo; comment out next line to stop tracking
 # database/events.db

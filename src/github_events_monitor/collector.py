@@ -8,7 +8,6 @@ Supports filtering for WatchEvent, PullRequestEvent, and IssuesEvent.
 import asyncio
 import json
 import logging
-import sqlite3
 import statistics
 from datetime import datetime, timedelta, timezone
 from typing import Dict, List, Optional, Any, Tuple
@@ -65,12 +64,14 @@ class GitHubEventsCollector:
 		self, 
 		db_path: str = "github_events.db",
 		github_token: Optional[str] = None,
-		user_agent: str = "GitHub-Events-Monitor/1.0"
+		user_agent: str = "GitHub-Events-Monitor/1.0",
+		target_repositories: Optional[List[str]] = None
 	):
 		self.db_path = db_path
 		self.github_token = github_token
 		self.user_agent = user_agent
 		self.api_base = "https://api.github.com"
+		self.target_repositories = target_repositories
 		self.last_etag: Optional[str] = None
 		self.last_modified: Optional[str] = None
 		
@@ -186,6 +187,63 @@ class GitHubEventsCollector:
 				return []
 			except Exception as e:
 				logger.error(f"Unexpected error: {e}")
+				return []
+	
+	async def fetch_repository_events(self, repo_name: str, limit: Optional[int] = None) -> List[GitHubEvent]:
+		"""
+		Fetch events from a specific repository
+		
+		Args:
+			repo_name: Repository name in format 'owner/repo'
+			limit: Maximum number of events to fetch (None for all available)
+			
+		Returns:
+			List of GitHubEvent objects
+		"""
+		async with httpx.AsyncClient(timeout=30.0) as client:
+			try:
+				response = await client.get(
+					f"{self.api_base}/repos/{repo_name}/events",
+					headers=self._get_headers()
+				)
+				
+				# Handle rate limiting
+				if response.status_code == 429:
+					reset_time = int(response.headers.get("X-RateLimit-Reset", 0))
+					wait_time = max(0, reset_time - int(datetime.now().timestamp()))
+					logger.warning(f"Rate limited for {repo_name}. Waiting {wait_time} seconds")
+					await asyncio.sleep(wait_time)
+					return []
+				
+				# Handle not found
+				if response.status_code == 404:
+					logger.warning(f"Repository {repo_name} not found or not accessible")
+					return []
+				
+				response.raise_for_status()
+				
+				events_data = response.json()
+				events = []
+				
+				for event_data in events_data:
+					event_type = event_data.get("type", "")
+					
+					# Filter for events we're monitoring
+					if event_type in self.MONITORED_EVENTS:
+						events.append(GitHubEvent.from_api_data(event_data))
+						
+					# Apply limit if specified
+					if limit and len(events) >= limit:
+						break
+				
+				logger.info(f"Fetched {len(events)} relevant events from {repo_name} out of {len(events_data)} total")
+				return events
+				
+			except httpx.RequestError as e:
+				logger.error(f"Request failed for {repo_name}: {e}")
+				return []
+			except Exception as e:
+				logger.error(f"Unexpected error for {repo_name}: {e}")
 				return []
 		
 	async def store_events(self, events: List[GitHubEvent]) -> int:
@@ -497,8 +555,19 @@ class GitHubEventsCollector:
 			Number of events stored
 		"""
 		await self.initialize_database()
-		events = await self.fetch_events(limit)
-		return await self.store_events(events)
+		
+		# If target repositories are configured, fetch from each one
+		if self.target_repositories:
+			all_events = []
+			for repo in self.target_repositories:
+				repo_events = await self.fetch_repository_events(repo, limit)
+				all_events.extend(repo_events)
+				logger.info(f"Collected {len(repo_events)} events from {repo}")
+			return await self.store_events(all_events)
+		else:
+			# Fall back to general public events
+			events = await self.fetch_events(limit)
+			return await self.store_events(events)
 
 # Async context manager for the collector
 @asynccontextmanager

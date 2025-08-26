@@ -221,9 +221,9 @@ class TestEndToEndWorkflow:
         
         # Test that collector handles rate limiting gracefully
         import time
-        start_time = time.time()
+        time.time()
         events = await collector.fetch_events()
-        end_time = time.time()
+        time.time()
         
         # Should return empty list when rate limited
         assert events == []
@@ -412,7 +412,7 @@ class TestEndToEndWorkflow:
         
         # Test PR interval performance
         start_time = time.time()
-        pr_interval = await collector.get_avg_pr_interval("org0/repo0")
+        await collector.get_avg_pr_interval("org0/repo0")
         pr_time = time.time() - start_time
         assert pr_time < 1.0  # Should complete within 1 second
     

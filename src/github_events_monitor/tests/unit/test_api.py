@@ -5,18 +5,16 @@ Tests the FastAPI endpoints for GitHub Events monitoring.
 """
 
 import pytest
-import asyncio
 import tempfile
 import os
 from datetime import datetime, timezone, timedelta
-from unittest.mock import AsyncMock, Mock, patch
+from unittest.mock import Mock, patch
 
 from fastapi.testclient import TestClient
 from fastapi import status
-import httpx
 
 # Import our API
-from ...api import app, collector_instance
+from ...api import app
 from ...collector import GitHubEventsCollector, GitHubEvent
 
 

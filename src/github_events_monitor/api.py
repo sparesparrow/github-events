@@ -11,16 +11,15 @@ from typing import Dict, List, Optional, Any
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, HTTPException, BackgroundTasks, Query, Depends
-from fastapi.responses import JSONResponse, PlainTextResponse
+from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 import matplotlib
 matplotlib.use('Agg')  # Use non-interactive backend for server
 import matplotlib.pyplot as plt
 import io
-import base64
 
-from .collector import GitHubEventsCollector, get_collector
+from .collector import GitHubEventsCollector
 from pathlib import Path
 from . import mcp_server as mcp_mod
 
@@ -30,6 +29,12 @@ GITHUB_TOKEN = os.getenv("GITHUB_TOKEN")
 POLL_INTERVAL = int(os.getenv("POLL_INTERVAL", "300"))  # 5 minutes default
 API_HOST = os.getenv("API_HOST", "0.0.0.0")
 API_PORT = int(os.getenv("API_PORT", "8000"))
+
+# Parse target repositories
+TARGET_REPOSITORIES = None
+target_repos_env = os.getenv("TARGET_REPOSITORIES")
+if target_repos_env:
+	TARGET_REPOSITORIES = [repo.strip() for repo in target_repos_env.split(",") if repo.strip()]
 
 # Global collector instance
 collector_instance: Optional[GitHubEventsCollector] = None
@@ -49,7 +54,7 @@ async def lifespan(app: FastAPI):
 		pass
 
 	# Initialize collector
-	collector_instance = GitHubEventsCollector(DATABASE_PATH, GITHUB_TOKEN)
+	collector_instance = GitHubEventsCollector(DATABASE_PATH, GITHUB_TOKEN, target_repositories=TARGET_REPOSITORIES)
 	await collector_instance.initialize_database()
 
 	# Start background polling task
@@ -142,7 +147,7 @@ async def get_collector_instance() -> GitHubEventsCollector:
 	"""
 	global collector_instance
 	if collector_instance is None:
-		collector_instance = GitHubEventsCollector(DATABASE_PATH, GITHUB_TOKEN)
+		collector_instance = GitHubEventsCollector(DATABASE_PATH, GITHUB_TOKEN, target_repositories=TARGET_REPOSITORIES)
 		await collector_instance.initialize_database()
 	return collector_instance
 
@@ -412,7 +417,7 @@ async def list_mcp_prompts():
 
 # Error handlers
 @app.exception_handler(404)
-async def not_found_handler(request, exc):
+async def not_found_handler(_request, exc):
 	# Preserve explicit details from raised HTTPException when available
 	detail = getattr(exc, "detail", None) or "Endpoint not found"
 	return JSONResponse(
@@ -421,7 +426,7 @@ async def not_found_handler(request, exc):
 	)
 
 @app.exception_handler(500)
-async def internal_error_handler(request, exc):
+async def internal_error_handler(_request, exc):
 	return JSONResponse(
 		status_code=500,
 		content={"detail": "Internal server error"}

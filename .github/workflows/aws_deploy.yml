@@ -1,0 +1,127 @@
+name: Deploy static dashboard to AWS S3
+
+on:
+  workflow_dispatch:
+    inputs:
+      s3_bucket:
+        description: "Target S3 bucket name"
+        required: true
+      aws_region:
+        description: "AWS region (e.g., us-east-1)"
+        required: true
+        default: "us-east-1"
+      cloudfront_distribution_id:
+        description: "Optional CloudFront Distribution ID for cache invalidation"
+        required: false
+        default: ""
+      repositories:
+        description: "Optional comma-separated repos (owner/repo) to visualize"
+        required: false
+        default: ""
+
+permissions:
+  contents: read
+
+jobs:
+  build-pages-artifacts:
+    name: Build dashboard artifacts
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt || true
+          pip install -e .
+          pip install requests
+
+      - name: Start API and export dashboard content
+        env:
+          PYTHONPATH: ${{ github.workspace }}/src
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          DATABASE_PATH: ./pages_demo.db
+          TARGET_REPOSITORIES: ${{ inputs.repositories || '' }}
+        run: |
+          python -m github_events_monitor.api > server.log 2>&1 &
+          echo $! > server.pid
+          for i in {1..24}; do
+            if curl -fsS --connect-timeout 3 --max-time 5 http://127.0.0.1:8000/health >/dev/null; then
+              break
+            fi
+            sleep 5
+          done
+          curl -X POST "http://127.0.0.1:8000/collect?limit=100" || true
+          sleep 6
+
+          python - <<'PY'
+          import os, json, requests
+          base = 'http://127.0.0.1:8000'
+          os.makedirs('pages_content', exist_ok=True)
+          def get(ep, **params):
+            try:
+              r = requests.get(base+ep, params=params, timeout=30)
+              return r.status_code, (r.json() if r.ok else {"error": r.text[:400]})
+            except Exception as e:
+              return 0, {"error": str(e)}
+          s_h,d_h = get('/health')
+          out = {}
+          for m in (10,60):
+            s,d = get('/metrics/event-counts', offset_minutes=m)
+            out[m] = {"status": s, "data": d}
+          s_t, d_t = get('/metrics/trending', hours=24, limit=10)
+          with open('pages_content/health.json','w') as f: json.dump({"status":s_h,"data":d_h}, f, indent=2)
+          with open('pages_content/event_counts_10.json','w') as f: json.dump(out[10], f, indent=2)
+          with open('pages_content/event_counts_60.json','w') as f: json.dump(out[60], f, indent=2)
+          with open('pages_content/trending.json','w') as f: json.dump({"status":s_t,"data":d_t}, f, indent=2)
+          cfg = {
+            "target_repositories": os.getenv('TARGET_REPOSITORIES','').split(',') if os.getenv('TARGET_REPOSITORIES') else [],
+            "repo_slug": os.getenv('GITHUB_REPOSITORY',''),
+            "run_id": os.getenv('GITHUB_RUN_ID',''),
+            "workflow": os.getenv('GITHUB_WORKFLOW','')
+          }
+          with open('pages_content/config.json','w') as f: json.dump(cfg, f, indent=2)
+          with open('pages_content/index.html','w') as f:
+            f.write('<!doctype html><meta charset="utf-8"><title>Dashboard</title><p>Artifact bundle generated. Use GitHub Pages job to build full dashboard.</p>')
+          PY
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: pages-content
+          path: pages_content/
+
+  deploy-to-s3:
+    name: Sync to S3 and invalidate CloudFront
+    needs: build-pages-artifacts
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: pages-content
+          path: pages_content
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ inputs.aws_region }}
+
+      - name: Upload to S3
+        run: |
+          aws s3 sync pages_content s3://${{ inputs.s3_bucket }}/ --delete --cache-control max-age=60
+
+      - name: Invalidate CloudFront (optional)
+        if: ${{ inputs.cloudfront_distribution_id != '' }}
+        run: |
+          aws cloudfront create-invalidation --distribution-id "${{ inputs.cloudfront_distribution_id }}" --paths "/*"
+

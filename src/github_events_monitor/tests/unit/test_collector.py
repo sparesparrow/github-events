@@ -6,14 +6,11 @@ Tests the core functionality of event collection, storage, and metric calculatio
 
 import pytest
 import asyncio
-import json
 import tempfile
 import os
 from datetime import datetime, timezone, timedelta
-from unittest.mock import AsyncMock, Mock, patch
-from typing import List, Dict, Any
+from unittest.mock import Mock, patch
 
-import httpx
 import aiosqlite
 
 from ..collector import GitHubEventsCollector, GitHubEvent  # type: ignore

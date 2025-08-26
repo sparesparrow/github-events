@@ -5,7 +5,7 @@ Centralized configuration management with environment variable support.
 """
 
 import os
-from typing import Optional
+from typing import Optional, List
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -22,6 +22,9 @@ class Config:
 	github_token: Optional[str] = None
 	github_api_base: str = "https://api.github.com"
 	user_agent: str = "GitHub-Events-Monitor/1.0"
+	
+	# Target repositories to monitor
+	target_repositories: List[str] = None
 	
 	# Polling settings
 	poll_interval_seconds: int = 300  # 5 minutes
@@ -46,12 +49,19 @@ class Config:
 	@classmethod
 	def from_env(cls) -> 'Config':
 		"""Create configuration from environment variables"""
+		# Parse target repositories from environment variable
+		target_repos_env = os.getenv("TARGET_REPOSITORIES")
+		target_repositories = None
+		if target_repos_env:
+			target_repositories = [repo.strip() for repo in target_repos_env.split(",") if repo.strip()]
+		
 		return cls(
 			database_path=os.getenv("DATABASE_PATH", cls.database_path),
 			database_url=os.getenv("DATABASE_URL"),
 			github_token=os.getenv("GITHUB_TOKEN"),
 			github_api_base=os.getenv("GITHUB_API_BASE", cls.github_api_base),
 			user_agent=os.getenv("USER_AGENT", cls.user_agent),
+			target_repositories=target_repositories,
 			poll_interval_seconds=int(os.getenv("POLL_INTERVAL", cls.poll_interval_seconds)),
 			max_events_per_fetch=int(os.getenv("MAX_EVENTS_PER_FETCH")) if os.getenv("MAX_EVENTS_PER_FETCH") else None,
 			api_host=os.getenv("API_HOST", cls.api_host),

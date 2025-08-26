@@ -1,5 +1,5 @@
 import requests
-from datetime import datetime, timezone
+from datetime import datetime
 from typing import List, Dict, Optional
 import statistics
 from dataclasses import dataclass

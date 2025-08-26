@@ -9,13 +9,11 @@ import asyncio
 import json
 import os
 from datetime import datetime, timezone
-from typing import Dict, List, Optional, Any
+from typing import Dict, Optional, Any
 
 import httpx
 
 from mcp.server.fastmcp import FastMCP
-from mcp.server import Server
-from mcp.types import Resource, Tool, TextContent, ImageContent
 
 """Client configuration: talk to REST API instead of local collector"""
 DATABASE_PATH = os.getenv("DATABASE_PATH", "github_events.db")  # For status display only
@@ -56,8 +54,8 @@ async def cleanup():
 
 async def background_poller():
 	"""Deprecated in client mode: no-op."""
-	while False:
-		await asyncio.sleep(POLL_INTERVAL)
+	# This function is intentionally empty in client mode
+	pass
 
 # MCP Tools - Model-controlled functions
 
