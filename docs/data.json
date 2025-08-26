@@ -1,6 +1,11 @@
 {
   "events_by_type_date": [
     {
+      "type": "IssuesEvent",
+      "day": "2025-08-26",
+      "count": 1
+    },
+    {
       "type": "PullRequestEvent",
       "day": "2025-08-26",
       "count": 6
@@ -8,7 +13,7 @@
     {
       "type": "WatchEvent",
       "day": "2025-08-26",
-      "count": 6
+      "count": 7
     }
   ],
   "top_repositories": [
@@ -62,6 +67,20 @@
       "issues": 0
     },
     {
+      "repo_name": "erichydrick/gift-registry",
+      "total_events": 1,
+      "watches": 0,
+      "pull_requests": 0,
+      "issues": 1
+    },
+    {
+      "repo_name": "microsoft/VibeVoice",
+      "total_events": 1,
+      "watches": 1,
+      "pull_requests": 0,
+      "issues": 0
+    },
+    {
       "repo_name": "roboflow/roboflow-python",
       "total_events": 1,
       "watches": 1,
@@ -98,5 +117,5 @@
     }
   ],
   "pr_metrics": [],
-  "last_updated": "2025-08-26T03:23:36Z"
+  "last_updated": "2025-08-26T03:43:13Z"
 }

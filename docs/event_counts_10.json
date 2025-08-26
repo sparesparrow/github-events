@@ -2,12 +2,12 @@
   "status": 200,
   "data": {
     "offset_minutes": 10,
-    "total_events": 6,
+    "total_events": 2,
     "counts": {
-      "WatchEvent": 5,
-      "PullRequestEvent": 1,
-      "IssuesEvent": 0
+      "WatchEvent": 1,
+      "PullRequestEvent": 0,
+      "IssuesEvent": 1
     },
-    "timestamp": "2025-08-26T03:23:36Z"
+    "timestamp": "2025-08-26T03:43:13Z"
   }
 }
