@@ -89,7 +89,16 @@ class GitHubEventsCollector:
 					collected_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 				)
 			""")
-			
+			# Defensive migration from legacy schema (type->event_type, created_at_ts→created_at TEXT)
+			try:
+				await db.execute("ALTER TABLE events ADD COLUMN event_type TEXT")
+			except Exception:
+				pass
+			try:
+				# If legacy column 'type' exists but 'event_type' is NULL, backfill
+				await db.execute("UPDATE events SET event_type = COALESCE(event_type, type)")
+			except Exception:
+				pass
 			# Create indices for performance
 			await db.execute("CREATE INDEX IF NOT EXISTS idx_event_type ON events(event_type)")
 			await db.execute("CREATE INDEX IF NOT EXISTS idx_repo_name ON events(repo_name)")
