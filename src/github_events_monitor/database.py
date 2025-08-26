@@ -19,11 +19,6 @@ from .dao import (
     EventsWriteDao,
     AggregatesDao,
 )
-from .collector import (
-    GitHubEventsCollector,
-    GitHubEvent,
-    get_collector,
-)
 
 
 class DatabaseManager:
@@ -82,8 +77,4 @@ __all__ = [
     "SchemaDao",
     "EventsWriteDao",
     "AggregatesDao",
-    # Collector
-    "GitHubEventsCollector",
-    "GitHubEvent",
-    "get_collector",
 ]

@@ -9,15 +9,22 @@ echo "🚀 GitHub Events Monitor - Live Dashboard"
 echo "======================================="
 
 # Check if Python is available
-if ! command -v python &> /dev/null; then
+PYTHON_CMD=""
+if command -v python3 &> /dev/null; then
+    PYTHON_CMD="python3"
+elif command -v python &> /dev/null; then
+    PYTHON_CMD="python"
+else
     echo "❌ Python is not installed. Please install Python 3.11+ first."
     exit 1
 fi
 
+echo "🐍 Using Python: $PYTHON_CMD"
+
 # Check if virtual environment exists
 if [ ! -d ".venv" ]; then
     echo "📦 Creating virtual environment..."
-    python -m venv .venv
+    $PYTHON_CMD -m venv .venv
 fi
 
 # Activate virtual environment
@@ -37,7 +44,7 @@ fi
 
 # Initialize database
 echo "🗄️  Initializing database..."
-python -c "
+$PYTHON_CMD -c "
 import asyncio
 from src.github_events_monitor.collector import GitHubEventsCollector
 
@@ -51,7 +58,7 @@ asyncio.run(init())
 
 # Collect initial data
 echo "📡 Collecting initial GitHub Events data..."
-python -c "
+$PYTHON_CMD -c "
 import asyncio
 from src.github_events_monitor.collector import GitHubEventsCollector
 
@@ -80,7 +87,7 @@ trap cleanup SIGINT SIGTERM EXIT
 # Start API server
 echo "🌐 Starting API server..."
 export CORS_ORIGINS="*"
-python -m src.github_events_monitor.api &
+$PYTHON_CMD -m src.github_events_monitor.api &
 API_PID=$!
 
 # Wait for API to start
