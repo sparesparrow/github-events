@@ -1,0 +1,49 @@
+version: '3.9'
+
+services:
+  github-events-api:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    ports:
+      - "${HOST_PORT:-8000}:${API_PORT:-8000}"
+    environment:
+      - DATABASE_PATH=${DATABASE_PATH:-/app/data/github_events.db}
+      - GITHUB_TOKEN=${GITHUB_TOKEN}
+      - API_HOST=${API_HOST:-0.0.0.0}
+      - API_PORT=${API_PORT:-8000}
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      - MCP_MODE=${MCP_MODE:-false}
+    volumes:
+      - ./data:/app/data
+      - ./logs:/app/logs
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "sh", "-c", "curl -f http://localhost:${API_PORT:-8000}/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+# Postgres service
+  postgres:
+    image: postgres:15
+    environment:
+      - POSTGRES_USER=${POSTGRES_USER:-github_events}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+      - POSTGRES_DB=${POSTGRES_DB:-github_events}
+    volumes:
+      - ./data/postgres:/var/lib/postgresql/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "${POSTGRES_USER}"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+
+
+
+
+
