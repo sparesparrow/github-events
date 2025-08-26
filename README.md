@@ -99,7 +99,7 @@ uv pip install -e .
 #### Method 3: Docker
 ```bash
 # Build and run with Docker Compose
-cd docker/
+cd ./
 docker-compose up -d
 
 # Or build manually
@@ -1023,7 +1023,7 @@ The project includes Docker support for containerized deployment:
 
 Quick start with Docker:
 ```bash
-cd docker/
+cd ./
 docker-compose up -d
 ```
 
@@ -1122,14 +1122,14 @@ github-events-clone/
 ├── src/                    # Source code
 ├── tests/                  # Test suite
 ├── docs/                   # Documentation
-├── docker/                 # Docker configurations
+├── (docker files at repo root)                 # Docker configurations
 │   ├── Dockerfile
 │   ├── docker-compose.yml
 │   ├── entrypoint.sh
 │   └── deploy.sh
 ├── .github/workflows/      # CI/CD workflows
 ├── scripts/                # Utility scripts
-├── service/                # Service layer
-├── mcp/                    # MCP server
+├── scripts/                # Service layer
+├── scripts/                    # MCP server
 └── database/               # Database schema
 ```
