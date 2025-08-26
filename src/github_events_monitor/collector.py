@@ -164,6 +164,13 @@ class GitHubEventsCollector:
 				# Update cache headers
 				self.last_etag = response.headers.get("ETag")
 				self.last_modified = response.headers.get("Last-Modified")
+				# Expose suggested poll interval if present
+				suggested_poll = response.headers.get("X-Poll-Interval")
+				if suggested_poll:
+					try:
+						self.suggested_poll_seconds = int(suggested_poll)
+					except Exception:
+						self.suggested_poll_seconds = None
 				
 				events_data = response.json()
 				events = []
@@ -222,6 +229,13 @@ class GitHubEventsCollector:
 				
 				response.raise_for_status()
 				
+				# Suggested poll interval for repo events
+				suggested_poll = response.headers.get("X-Poll-Interval")
+				if suggested_poll:
+					try:
+						self.suggested_poll_seconds = int(suggested_poll)
+					except Exception:
+						self.suggested_poll_seconds = None
 				events_data = response.json()
 				events = []
 				

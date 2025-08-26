@@ -12,6 +12,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, HTTPException, BackgroundTasks, Query, Depends
 from fastapi.responses import JSONResponse
+from fastapi import Header
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 import matplotlib
@@ -163,7 +164,11 @@ async def background_poller():
 		except Exception as e:
 			print(f"Background polling error: {e}")
 		
-		await asyncio.sleep(POLL_INTERVAL)
+		# Respect GitHub's suggested poll interval if available
+		poll_seconds = getattr(collector_instance, 'suggested_poll_seconds', None)
+		if not poll_seconds or poll_seconds <= 0:
+			poll_seconds = POLL_INTERVAL
+		await asyncio.sleep(poll_seconds)
 
 # API Endpoints
 
@@ -193,6 +198,47 @@ async def manual_collect(
 	background_tasks.add_task(collect_task)
 	
 	return {"message": "Collection started", "limit": limit}
+
+@app.post("/webhook")
+async def github_webhook(
+	x_github_event: Optional[str] = Header(None, alias="X-GitHub-Event"),
+	x_hub_signature_256: Optional[str] = Header(None, alias="X-Hub-Signature-256"),
+	payload: dict = None,
+	collector: GitHubEventsCollector = Depends(get_collector_instance)
+):
+	"""
+	Optional webhook receiver for GitHub events. Stores only monitored types.
+	Signature verification can be added by setting a shared secret and validating
+	X-Hub-Signature-256; omitted for brevity in this assignment.
+	"""
+	try:
+		if not payload or not isinstance(payload, dict):
+			return {"status": "ignored"}
+		# Normalize to our schema; accept only monitored types
+		event_type = x_github_event or payload.get("type")
+		if event_type not in {"WatchEvent", "PullRequestEvent", "IssuesEvent"}:
+			return {"status": "ignored"}
+		# Convert single event into GitHubEvent and store
+		from .collector import GitHubEvent
+		try:
+			repo = payload.get("repository") or {}
+			actor = payload.get("sender") or payload.get("actor") or {}
+			created_at = payload.get("created_at") or datetime.now(timezone.utc).isoformat()
+			ge = GitHubEvent(
+				id=str(payload.get("id") or f"wh_{int(datetime.now().timestamp()*1000)}"),
+				event_type=event_type,
+				repo_name=str(repo.get("full_name") or repo.get("name") or "unknown/unknown"),
+				actor_login=str(actor.get("login") or "unknown"),
+				created_at=datetime.fromisoformat(created_at.replace('Z', '+00:00')),
+				payload=payload,
+			)
+			affected = await collector.store_events([ge])
+		except Exception:
+			# Accept but ignore if payload missing required fields
+			affected = 0
+		return {"status": "ok", "stored": affected}
+	except Exception as e:
+		raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/metrics/event-counts", response_model=EventCountsResponse)
 async def get_event_counts(
