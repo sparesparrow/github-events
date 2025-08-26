@@ -53,6 +53,7 @@ jobs:
 
     permissions:
       contents: read
+      actions: read
       pages: write
       id-token: write
 
@@ -65,6 +66,38 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Install tools (jq, unzip)
+        run: |
+          sudo apt-get update -y
+          sudo apt-get install -y jq unzip
+
+      - name: Download latest DB artifact (if available)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -e
+          REPO="$GITHUB_REPOSITORY"
+          API="https://api.github.com/repos/$REPO/actions/artifacts?per_page=100"
+          echo "🔎 Fetching artifacts from $API"
+          RESP=$(curl -fsSL -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github+json" "$API" || echo '{}')
+          URL=$(echo "$RESP" | jq -r '.artifacts | map(select(.name=="github_events_db" and .expired==false)) | sort_by(.created_at) | last | .archive_download_url // empty')
+          if [ -n "$URL" ]; then
+            echo "📦 Found artifact. Downloading..."
+            curl -fsSL -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github+json" -o db_artifact.zip "$URL"
+            unzip -o db_artifact.zip >/dev/null
+            FOUND=$(find . -maxdepth 2 -type f -name 'github_events.db' | head -n1 || true)
+            if [ -n "$FOUND" ] && [ "$FOUND" != "./github_events.db" ]; then
+              mv "$FOUND" ./github_events.db
+            fi
+            if [ -f ./github_events.db ]; then
+              echo "✅ Restored DB from artifact: $(du -h ./github_events.db | cut -f1)"
+            else
+              echo "⚠️ Artifact did not contain github_events.db"
+            fi
+          else
+            echo "ℹ️ No prior DB artifact found; proceeding without restore"
+          fi
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -79,12 +112,12 @@ jobs:
           pip install -e .
           pip install requests
 
-      - name: Start API with health check (source module)
+      - name: Start API with health check (use restored DB if present)
         env:
           PYTHONPATH: ${{ github.workspace }}/src
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          DATABASE_PATH: ./pages_demo.db
-          TARGET_REPOSITORIES: ${{ github.event.inputs.repositories != '' && github.event.inputs.repositories || 'sparesparrow/mcp-prompts' }}
+          DATABASE_PATH: ./github_events.db
+          TARGET_REPOSITORIES: ${{ github.event.inputs.repositories != '' && github.event.inputs.repositories || '' }}
         run: |
           python -m src.github_events_monitor.api > server.log 2>&1 &
           echo $! > server.pid
@@ -101,7 +134,7 @@ jobs:
             fi
           done
 
-      - name: Collect events from target repositories
+      - name: Collect events (refresh data)
         env:
           BASE_URL: http://127.0.0.1:8000
         run: |
@@ -111,7 +144,7 @@ jobs:
           echo "⏳ Waiting for data processing..."
           sleep 10
 
-      - name: Export API JSON for dashboard
+      - name: Export API JSON for dashboard (real data only)
         env:
           BASE_URL: http://127.0.0.1:8000
         run: |
@@ -138,21 +171,10 @@ jobs:
             s, d = get("/metrics/event-counts", offset_minutes=m)
             out[m] = {"status": s, "data": d}
 
-          # Trending: 24 hours
+          # Trending: 24 hours (no placeholders)
           s_t, d_t = get("/metrics/trending", hours=24, limit=10)
-          repos = (d_t or {}).get("repositories") if isinstance(d_t, dict) else None
-          if not repos:
-            d_t = {
-              "hours": 24,
-              "repositories": [
-                {"repo_name":"sample/repo-a","total_events":12,"watch_events":6,"pr_events":3,"issue_events":3},
-                {"repo_name":"sample/repo-b","total_events":9,"watch_events":4,"pr_events":3,"issue_events":2},
-                {"repo_name":"sample/repo-c","total_events":7,"watch_events":3,"pr_events":2,"issue_events":2},
-              ],
-              "timestamp": __import__("datetime").datetime.utcnow().isoformat()+"Z",
-              "note":"sample fallback due to empty or unavailable trending data"
-            }
-            s_t = 200
+          if s_t != 200:
+            raise SystemExit(f"Trending failed with status {s_t}: {d_t}")
 
           # Write JSON files - ensure they exist and have content
           files_written = []
