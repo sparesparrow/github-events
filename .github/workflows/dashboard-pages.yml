@@ -74,10 +74,10 @@ jobs:
       - name: Export dashboard HTML via MCP tool
         run: |
           python - <<'PY'
-from mcp.dashboard_export_server import export_dashboard_html
-out = export_dashboard_html(base_url="http://localhost:8000", include_plotlyjs="cdn", output_path="docs/index.html")
-print(out)
-PY
+          from mcp.dashboard_export_server import export_dashboard_html
+          out = export_dashboard_html(base_url="http://localhost:8000", include_plotlyjs="cdn", output_path="docs/index.html")
+          print(out)
+          PY
 
       - name: Stop API server
         if: always()
