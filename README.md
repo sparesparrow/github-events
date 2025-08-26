@@ -168,6 +168,15 @@ Notes:
 - created_at_ts (epoch) enables correct time filtering and SQLite date ops.
 - For production, consider PostgreSQL, containerization, and a retention policy for events.
 
+## Release Notes
+
+### 1.1.0
+- Added PR timeline visualization endpoint: `GET /visualization/pr-timeline`.
+- Added optional webhook receiver: `POST /webhook` for monitored event types.
+- Dashboard exporter now writes `trending.json`, `event_counts_10.json`, `event_counts_60.json`, `data_status.json`, and `config.json`.
+- Background poller now respects GitHub `X-Poll-Interval` when available.
+- GitHub Pages workflow for scheduled/manual dashboard publishing.
+
 ## Project Structure
 
 ```
