@@ -24,7 +24,11 @@ import aiosqlite
 
 from .collector import GitHubEventsCollector
 from pathlib import Path
-from . import mcp_server as mcp_mod
+# MCP integration may live outside the package after cleanup; import defensively
+try:
+	from . import mcp_server as mcp_mod  # type: ignore
+except Exception:  # pragma: no cover - optional dependency
+	mcp_mod = None  # type: ignore
 from .dao import EventsDaoFactory, AggregatesDao
 
 
@@ -864,7 +868,19 @@ def _get_doc(fn: Any) -> str:
 
 @app.get("/mcp/capabilities")
 async def get_mcp_capabilities():
-	"""List MCP tools, resources, and prompts exposed by the server"""
+	"""List MCP tools, resources, and prompts exposed by the optional MCP server.
+
+	If the MCP module is not available inside this package, return empty lists with a
+	helpful note so clients can adapt gracefully.
+	"""
+	if not mcp_mod:
+		return {
+			"tools": [],
+			"resources": [],
+			"prompts": [],
+			"note": "MCP server moved outside package; run scripts/mcp_server_cli.py to use MCP.",
+			"timestamp": datetime.now(timezone.utc).isoformat(),
+		}
 	tools = [
 		{"name": "get_event_counts", "description": _get_doc(mcp_mod.get_event_counts)},
 		{"name": "get_avg_pr_interval", "description": _get_doc(mcp_mod.get_avg_pr_interval)},
