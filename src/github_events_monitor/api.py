@@ -6,7 +6,7 @@ FastAPI application providing REST endpoints for GitHub Events monitoring metric
 
 import os
 import asyncio
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from typing import Dict, List, Optional, Any, Awaitable, Callable, Union
 from contextlib import asynccontextmanager
 
