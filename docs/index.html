@@ -1,128 +1,349 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1"/>
-  <title>GitHub Events Dashboard</title>
-  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet"/>
-  <style>
-    body { background:#f6f7fb }
-    .metric-card { border-radius:12px; color:#fff; padding:20px; margin-bottom:16px; }
-    .bg1 { background:linear-gradient(135deg,#6366f1,#8b5cf6) }
-    .bg2 { background:linear-gradient(135deg,#10b981,#22c55e) }
-    .bg3 { background:linear-gradient(135deg,#f59e0b,#ef4444) }
-    .bg4 { background:linear-gradient(135deg,#06b6d4,#3b82f6) }
-    .chart-container { background:#fff; border-radius:12px; padding:16px; box-shadow:0 2px 6px rgba(0,0,0,.05); margin-bottom:20px;}
-    .last-updated { font-size:.9rem; color:#6b7280 }
-    iframe { border:0; width:100%; height:480px; border-radius:8px; background:#fff }
-    table { font-size:.95rem }
-    th { white-space:nowrap }
-    td, th { vertical-align:middle }
-  </style>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>🚀 GitHub Events Monitor — Dashboard</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        body {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        }
+        .dashboard-container {
+            background: rgba(255, 255, 255, 0.95);
+            backdrop-filter: blur(10px);
+            border-radius: 20px;
+            margin: 20px;
+            padding: 30px;
+            box-shadow: 0 20px 40px rgba(0,0,0,0.1);
+        }
+        .metric-card {
+            background: linear-gradient(135deg, #6366f1, #8b5cf6);
+            color: white;
+            border-radius: 15px;
+            padding: 25px;
+            margin-bottom: 20px;
+            box-shadow: 0 10px 25px rgba(0,0,0,0.15);
+            transition: transform 0.3s ease;
+        }
+        .metric-card:hover {
+            transform: translateY(-5px);
+        }
+        .metric-card.events-card { background: linear-gradient(135deg, #10b981, #22c55e); }
+        .metric-card.pr-card { background: linear-gradient(135deg, #f59e0b, #ef4444); }
+        .metric-card.watch-card { background: linear-gradient(135deg, #06b6d4, #3b82f6); }
+        .chart-container {
+            background: white;
+            border-radius: 15px;
+            padding: 25px;
+            margin-bottom: 25px;
+            box-shadow: 0 10px 25px rgba(0,0,0,0.08);
+        }
+        .status-badge {
+            display: inline-block;
+            padding: 8px 16px;
+            border-radius: 50px;
+            font-size: 0.9rem;
+            font-weight: 600;
+        }
+        .status-live { background: #10b981; color: white; }
+        .status-loading { background: #f59e0b; color: white; }
+        .repo-table {
+            border-radius: 15px;
+            overflow: hidden;
+            box-shadow: 0 10px 25px rgba(0,0,0,0.08);
+        }
+        .repo-table th {
+            background: linear-gradient(135deg, #4f46e5, #6366f1);
+            color: white;
+            border: none;
+            padding: 15px;
+        }
+        .repo-table td {
+            padding: 12px 15px;
+            border: none;
+            border-bottom: 1px solid #f1f5f9;
+        }
+        .repo-name {
+            font-weight: 600;
+            color: #1e293b;
+        }
+        .metric-number {
+            font-size: 2.5rem;
+            font-weight: 700;
+            margin-bottom: 5px;
+        }
+        .metric-label {
+            font-size: 1rem;
+            opacity: 0.9;
+        }
+        .header-title {
+            background: linear-gradient(135deg, #6366f1, #8b5cf6);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+            font-weight: 800;
+            font-size: 2.5rem;
+        }
+        .loading-spinner {
+            display: inline-block;
+            width: 20px;
+            height: 20px;
+            border: 3px solid #f3f3f3;
+            border-top: 3px solid #6366f1;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+    </style>
 </head>
 <body>
-<nav class="navbar navbar-dark bg-dark">
-  <div class="container">
-    <a class="navbar-brand fw-bold" href="#">📊 GitHub Events Dashboard</a>
-    <span class="navbar-text last-updated" id="lastUpdated">Loading...</span>
-  </div>
-</nav>
+    <div class="dashboard-container">
+        <!-- Header -->
+        <div class="text-center mb-5">
+            <h1 class="header-title mb-3">🚀 GitHub Events Monitor</h1>
+            <div id="status-container">
+                <span id="status-badge" class="status-badge status-loading">
+                    <span class="loading-spinner me-2"></span>Loading...
+                </span>
+            </div>
+            <div class="mt-2">
+                <small class="text-muted" id="last-updated">Updated: Loading...</small>
+            </div>
+        </div>
 
-<main class="container my-4">
-  <div class="row" id="metrics"></div>
+        <!-- Metrics Cards -->
+        <div class="row" id="metrics-container">
+            <div class="col-md-3">
+                <div class="metric-card">
+                    <div class="metric-number" id="total-events">--</div>
+                    <div class="metric-label"><i class="fas fa-chart-line me-2"></i>Total Events</div>
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="metric-card events-card">
+                    <div class="metric-number" id="issue-events">--</div>
+                    <div class="metric-label"><i class="fas fa-exclamation-circle me-2"></i>Issues Events</div>
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="metric-card pr-card">
+                    <div class="metric-number" id="pr-events">--</div>
+                    <div class="metric-label"><i class="fas fa-code-branch me-2"></i>Pull Requests</div>
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="metric-card watch-card">
+                    <div class="metric-number" id="watch-events">--</div>
+                    <div class="metric-label"><i class="fas fa-eye me-2"></i>Watch Events</div>
+                </div>
+            </div>
+        </div>
 
-  <div class="row">
-    <div class="col-12">
-      <div class="chart-container">
-        <h5 class="mb-3">Events Timeline by Type</h5>
-        <iframe src="events_timeline.html"></iframe>
-      </div>
+        <!-- Charts Section -->
+        <div class="row">
+            <div class="col-md-6">
+                <div class="chart-container">
+                    <h5 class="mb-4"><i class="fas fa-fire me-2"></i>Event Distribution</h5>
+                    <canvas id="eventChart" width="400" height="200"></canvas>
+                </div>
+            </div>
+            <div class="col-md-6">
+                <div class="chart-container">
+                    <h5 class="mb-4"><i class="fas fa-clock me-2"></i>Event Timeline (10 vs 60 min)</h5>
+                    <canvas id="timelineChart" width="400" height="200"></canvas>
+                </div>
+            </div>
+        </div>
+
+        <!-- Target Repositories Section -->
+        <div class="chart-container">
+            <h5 class="mb-4"><i class="fas fa-bullseye me-2"></i>Target Repositories</h5>
+            <div id="target-repos-info" class="alert alert-info">
+                <i class="fas fa-info-circle me-2"></i>
+                Monitoring public GitHub events. Configure TARGET_REPOSITORIES environment variable to focus on specific repositories.
+            </div>
+        </div>
+
+        <!-- Trending Repositories -->
+        <div class="chart-container">
+            <h5 class="mb-4"><i class="fas fa-trophy me-2"></i>🔥 Trending Repositories (24h)</h5>
+            <div class="table-responsive">
+                <table class="table repo-table">
+                    <thead>
+                        <tr>
+                            <th><i class="fab fa-github me-2"></i>Repository</th>
+                            <th><i class="fas fa-chart-bar me-2"></i>Total</th>
+                            <th><i class="fas fa-eye me-2"></i>Watches</th>
+                            <th><i class="fas fa-code-branch me-2"></i>PRs</th>
+                            <th><i class="fas fa-exclamation-circle me-2"></i>Issues</th>
+                            <th><i class="fas fa-clock me-2"></i>Activity</th>
+                        </tr>
+                    </thead>
+                    <tbody id="repos-tbody">
+                        <tr>
+                            <td colspan="6" class="text-center">
+                                <span class="loading-spinner me-2"></span>Loading repositories...
+                            </td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- Debug Info -->
+        <div class="chart-container">
+            <h6 class="mb-3"><i class="fas fa-cog me-2"></i>Debug Console</h6>
+            <div id="debug-console" class="bg-light p-3 rounded" style="font-family: monospace; font-size: 0.9rem;">
+                Initializing dashboard...
+            </div>
+        </div>
     </div>
-  </div>
 
-  <div class="row g-3">
-    <div class="col-md-6">
-      <div class="chart-container">
-        <h5 class="mb-3">Repository Activity (Top 10)</h5>
-        <iframe src="repository_activity.html"></iframe>
-      </div>
-    </div>
-    <div class="col-md-6">
-      <div class="chart-container">
-        <h5 class="mb-3">PR Metrics</h5>
-        <iframe src="pr_metrics.html"></iframe>
-      </div>
-    </div>
-  </div>
+    <script>
+        let eventChart, timelineChart;
 
-  <div class="chart-container mt-3">
-    <h5 class="mb-3">Top Repositories Table</h5>
-    <div class="table-responsive">
-      <table class="table table-striped align-middle">
-        <thead><tr>
-          <th>Repository</th><th>Total</th><th>Watches</th><th>PRs</th><th>Issues</th>
-        </tr></thead>
-        <tbody id="reposBody"></tbody>
-      </table>
-    </div>
-  </div>
-</main>
+        async function loadDashboardData() {
+            const debugEl = document.getElementById('debug-console');
+            
+            try {
+                debugEl.innerHTML = 'Fetching dashboard data...';
+                
+                // Load main dashboard data
+                const dataRes = await fetch('data.json?' + new Date().getTime(), { cache: 'no-store' });
+                const data = await dataRes.json();
+                
+                // Load additional data files
+                const [counts10Res, counts60Res, trendingRes, statusRes] = await Promise.all([
+                    fetch('event_counts_10.json?' + new Date().getTime()),
+                    fetch('event_counts_60.json?' + new Date().getTime()),
+                    fetch('trending.json?' + new Date().getTime()),
+                    fetch('data_status.json?' + new Date().getTime())
+                ]);
 
-<footer class="bg-dark text-light py-3 text-center">
-  <div class="container">© GitHub Events Monitor</div>
-</footer>
+                const counts10 = await counts10Res.json();
+                const counts60 = await counts60Res.json();
+                const trending = await trendingRes.json();
+                const status = await statusRes.json();
 
-<script>
-async function loadData() {
-  try {
-    const res = await fetch('data.json', {cache:'no-store'});
-    const data = await res.json();
-    render(data);
-  } catch (e) {
-    document.getElementById('lastUpdated').textContent = 'Failed to load data';
-    console.error(e);
-  }
-}
+                debugEl.innerHTML = `✅ Data loaded successfully
+📊 Events (60min): ${JSON.stringify(counts60)}
+🔥 Trending repos: ${trending.data.repositories.length}
+📍 Status: ${status.health_status}
+🕒 Generated: ${status.generated_at}`;
 
-function render(data) {
-  document.getElementById('lastUpdated').textContent = 'Last updated: ' + new Date(data.last_updated).toLocaleString();
+                renderDashboard(data, counts10, counts60, trending, status);
+                
+            } catch (error) {
+                debugEl.innerHTML = `❌ Error loading data: ${error.message}`;
+                document.getElementById('status-badge').innerHTML = '<i class="fas fa-exclamation-triangle me-2"></i>Error';
+                document.getElementById('status-badge').className = 'status-badge bg-danger text-white';
+                console.error('Dashboard error:', error);
+            }
+        }
 
-  const countsByType = data.events_by_type_date.reduce((acc, row) => {
-    acc[row.type] = (acc[row.type] || 0) + row.count;
-    return acc;
-  }, {});
-  const total = Object.values(countsByType).reduce((a,b)=>a+b,0);
+        function renderDashboard(data, counts10, counts60, trending, status) {
+            // Update status
+            document.getElementById('status-badge').innerHTML = '<i class="fas fa-check-circle me-2"></i>Live';
+            document.getElementById('status-badge').className = 'status-badge status-live';
+            document.getElementById('last-updated').textContent = `Updated: ${new Date(data.last_updated).toLocaleString()}`;
 
-  const metrics = [
-    {cls:'bg1', title:'Total Events', val: total},
-    {cls:'bg2', title:'Watch Events', val: countsByType['WatchEvent'] || 0},
-    {cls:'bg3', title:'Pull Request Events', val: countsByType['PullRequestEvent'] || 0},
-    {cls:'bg4', title:'Issues Events', val: countsByType['IssuesEvent'] || 0},
-  ];
-  const metricsEl = document.getElementById('metrics');
-  metricsEl.innerHTML = metrics.map(m => `
-    <div class="col-md-3">
-      <div class="metric-card ${m.cls} text-center">
-        <div class="h2 mb-0">${m.val}</div>
-        <div>${m.title}</div>
-      </div>
-    </div>
-  `).join('');
+            // Calculate totals
+            const total60 = Object.values(counts60).reduce((a, b) => a + b, 0);
+            const total10 = Object.values(counts10).reduce((a, b) => a + b, 0);
 
-  const tbody = document.getElementById('reposBody');
-  tbody.innerHTML = (data.top_repositories || []).map(r => `
-    <tr>
-      <td class="fw-medium">${r.repo_name}</td>
-      <td>${r.total_events}</td>
-      <td>${r.watches}</td>
-      <td>${r.pull_requests}</td>
-      <td>${r.issues}</td>
-    </tr>
-  `).join('');
-}
+            // Update metric cards
+            document.getElementById('total-events').textContent = total60;
+            document.getElementById('issue-events').textContent = counts60.IssuesEvent || 0;
+            document.getElementById('pr-events').textContent = counts60.PullRequestEvent || 0;
+            document.getElementById('watch-events').textContent = counts60.WatchEvent || 0;
 
-document.addEventListener('DOMContentLoaded', loadData);
-setInterval(loadData, 5 * 60 * 1000);
-</script>
+            // Render event distribution chart
+            if (eventChart) eventChart.destroy();
+            const ctx1 = document.getElementById('eventChart').getContext('2d');
+            eventChart = new Chart(ctx1, {
+                type: 'doughnut',
+                data: {
+                    labels: ['Issues', 'Pull Requests', 'Watch Events'],
+                    datasets: [{
+                        data: [counts60.IssuesEvent || 0, counts60.PullRequestEvent || 0, counts60.WatchEvent || 0],
+                        backgroundColor: ['#10b981', '#f59e0b', '#06b6d4'],
+                        borderWidth: 3,
+                        borderColor: '#fff'
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    plugins: {
+                        legend: { position: 'bottom' }
+                    }
+                }
+            });
+
+            // Render timeline comparison chart
+            if (timelineChart) timelineChart.destroy();
+            const ctx2 = document.getElementById('timelineChart').getContext('2d');
+            timelineChart = new Chart(ctx2, {
+                type: 'bar',
+                data: {
+                    labels: ['Issues', 'Pull Requests', 'Watch Events'],
+                    datasets: [
+                        {
+                            label: 'Last 10 min',
+                            data: [counts10.IssuesEvent || 0, counts10.PullRequestEvent || 0, counts10.WatchEvent || 0],
+                            backgroundColor: 'rgba(99, 102, 241, 0.8)'
+                        },
+                        {
+                            label: 'Last 60 min',
+                            data: [counts60.IssuesEvent || 0, counts60.PullRequestEvent || 0, counts60.WatchEvent || 0],
+                            backgroundColor: 'rgba(139, 92, 246, 0.8)'
+                        }
+                    ]
+                },
+                options: {
+                    responsive: true,
+                    plugins: {
+                        legend: { position: 'top' }
+                    },
+                    scales: {
+                        y: { beginAtZero: true }
+                    }
+                }
+            });
+
+            // Render repositories table
+            const tbody = document.getElementById('repos-tbody');
+            tbody.innerHTML = trending.data.repositories.slice(0, 10).map((repo, index) => `
+                <tr>
+                    <td class="repo-name">
+                        <span class="badge bg-primary me-2">${index + 1}</span>
+                        ${repo.repo_name}
+                    </td>
+                    <td><strong>${repo.total_events}</strong></td>
+                    <td>${repo.watch_events}</td>
+                    <td>${repo.pr_events}</td>
+                    <td>${repo.issue_events}</td>
+                    <td>
+                        <div class="progress" style="height: 8px;">
+                            <div class="progress-bar bg-success" style="width: ${Math.min(100, (repo.total_events / Math.max(...trending.data.repositories.map(r => r.total_events))) * 100)}%"></div>
+                        </div>
+                    </td>
+                </tr>
+            `).join('');
+        }
+
+        // Initialize dashboard
+        document.addEventListener('DOMContentLoaded', loadDashboardData);
+        
+        // Auto-refresh every 5 minutes
+        setInterval(loadDashboardData, 5 * 60 * 1000);
+    </script>
 </body>
 </html>
