@@ -183,6 +183,71 @@ async def get_trending_repositories(hours: int = 24, limit: int = 10) -> Dict[st
 		return {"error": str(e), "success": False}
 
 @mcp.tool()
+async def get_trending_chart_image(hours: int = 24, limit: int = 10, format: str = "png") -> Dict[str, Any]:
+	"""
+	Fetch the trending repositories chart image from the REST API.
+
+	Args:
+		hours: Number of hours to look back
+		limit: Number of repositories to include
+		format: Image format (png or svg)
+
+	Returns:
+		Dictionary with base64-encoded image data and media type
+	"""
+	if not http_client:
+		return {"error": "HTTP client not initialized"}
+	try:
+		resp = await http_client.get(
+			"/visualization/trending-chart",
+			params={"hours": hours, "limit": limit, "format": format},
+		)
+		resp.raise_for_status()
+		media_type = "image/svg+xml" if format == "svg" else "image/png"
+		import base64 as _b64
+		img_b64 = _b64.b64encode(resp.content).decode("utf-8")
+		return {
+			"success": True,
+			"media_type": media_type,
+			"format": format,
+			"image_base64": img_b64,
+			"timestamp": datetime.now(timezone.utc).isoformat(),
+		}
+	except Exception as e:
+		return {"error": str(e), "success": False}
+
+@mcp.tool()
+async def get_pr_timeline_chart(repo_name: str, days: int = 7, format: str = "png") -> Dict[str, Any]:
+	"""
+	Fetch PR timeline visualization or placeholder data from REST API.
+
+	Args:
+		repo_name: Repository name in format 'owner/repo'
+		days: Number of days to look back
+		format: Image format (png or svg)
+
+	Returns:
+		Dictionary with response from API (image or JSON placeholder for now)
+	"""
+	if not http_client:
+		return {"error": "HTTP client not initialized"}
+	try:
+		resp = await http_client.get(
+			"/visualization/pr-timeline",
+			params={"repo": repo_name, "days": days, "format": format},
+		)
+		resp.raise_for_status()
+		content_type = resp.headers.get("content-type", "application/json")
+		if content_type.startswith("image/"):
+			import base64 as _b64
+			img_b64 = _b64.b64encode(resp.content).decode("utf-8")
+			return {"success": True, "media_type": content_type, "image_base64": img_b64}
+		else:
+			return {"success": True, "data": resp.json()}
+	except Exception as e:
+		return {"error": str(e), "success": False}
+
+@mcp.tool()
 async def collect_events_now(limit: Optional[int] = None) -> Dict[str, Any]:
 	"""
 	Manually trigger immediate collection of events from GitHub API.

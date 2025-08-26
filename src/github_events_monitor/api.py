@@ -12,6 +12,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, HTTPException, BackgroundTasks, Query, Depends
 from fastapi.responses import JSONResponse, PlainTextResponse
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 import matplotlib
 matplotlib.use('Agg')  # Use non-interactive backend for server
@@ -69,6 +70,17 @@ app = FastAPI(
 	description="Monitor GitHub Events and provide metrics via REST API",
 	version="1.0.0",
 	lifespan=lifespan
+)
+
+# CORS configuration (allow GitHub Pages and configurable origins)
+_cors_origins_env = os.getenv("CORS_ORIGINS", "*")
+_allow_origins = [o.strip() for o in _cors_origins_env.split(",")] if _cors_origins_env != "*" else ["*"]
+app.add_middleware(
+	CORSMiddleware,
+	allow_origins=_allow_origins,
+	allow_credentials=True,
+	allow_methods=["*"],
+	allow_headers=["*"],
 )
 
 # Pydantic models for API responses
@@ -367,6 +379,8 @@ async def get_mcp_capabilities():
 		{"name": "get_trending_repositories", "description": _get_doc(mcp_mod.get_trending_repositories)},
 		{"name": "collect_events_now", "description": _get_doc(mcp_mod.collect_events_now)},
 		{"name": "get_health", "description": _get_doc(mcp_mod.get_health)},
+		{"name": "get_trending_chart_image", "description": _get_doc(getattr(mcp_mod, "get_trending_chart_image", None))},
+		{"name": "get_pr_timeline_chart", "description": _get_doc(getattr(mcp_mod, "get_pr_timeline_chart", None))},
 	]
 	resources = [
 		{"uri": "github://events/status", "name": "server_status", "description": _get_doc(mcp_mod.server_status)},
