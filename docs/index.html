@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <title>GitHub Events Dashboard</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet"/>
+  <style>
+    body { background:#f6f7fb }
+    .metric-card { border-radius:12px; color:#fff; padding:20px; margin-bottom:16px; }
+    .bg1 { background:linear-gradient(135deg,#6366f1,#8b5cf6) }
+    .bg2 { background:linear-gradient(135deg,#10b981,#22c55e) }
+    .bg3 { background:linear-gradient(135deg,#f59e0b,#ef4444) }
+    .bg4 { background:linear-gradient(135deg,#06b6d4,#3b82f6) }
+    .chart-container { background:#fff; border-radius:12px; padding:16px; box-shadow:0 2px 6px rgba(0,0,0,.05); margin-bottom:20px;}
+    .last-updated { font-size:.9rem; color:#6b7280 }
+    iframe { border:0; width:100%; height:480px; border-radius:8px; background:#fff }
+    table { font-size:.95rem }
+    th { white-space:nowrap }
+    td, th { vertical-align:middle }
+  </style>
+</head>
+<body>
+<nav class="navbar navbar-dark bg-dark">
+  <div class="container">
+    <a class="navbar-brand fw-bold" href="#">📊 GitHub Events Dashboard</a>
+    <span class="navbar-text last-updated" id="lastUpdated">Loading...</span>
+  </div>
+</nav>
+
+<main class="container my-4">
+  <div class="row" id="metrics"></div>
+
+  <div class="row">
+    <div class="col-12">
+      <div class="chart-container">
+        <h5 class="mb-3">Events Timeline by Type</h5>
+        <iframe src="events_timeline.html"></iframe>
+      </div>
+    </div>
+  </div>
+
+  <div class="row g-3">
+    <div class="col-md-6">
+      <div class="chart-container">
+        <h5 class="mb-3">Repository Activity (Top 10)</h5>
+        <iframe src="repository_activity.html"></iframe>
+      </div>
+    </div>
+    <div class="col-md-6">
+      <div class="chart-container">
+        <h5 class="mb-3">PR Metrics</h5>
+        <iframe src="pr_metrics.html"></iframe>
+      </div>
+    </div>
+  </div>
+
+  <div class="chart-container mt-3">
+    <h5 class="mb-3">Top Repositories Table</h5>
+    <div class="table-responsive">
+      <table class="table table-striped align-middle">
+        <thead><tr>
+          <th>Repository</th><th>Total</th><th>Watches</th><th>PRs</th><th>Issues</th>
+        </tr></thead>
+        <tbody id="reposBody"></tbody>
+      </table>
+    </div>
+  </div>
+</main>
+
+<footer class="bg-dark text-light py-3 text-center">
+  <div class="container">© GitHub Events Monitor</div>
+</footer>
+
+<script>
+async function loadData() {
+  try {
+    const res = await fetch('data.json', {cache:'no-store'});
+    const data = await res.json();
+    render(data);
+  } catch (e) {
+    document.getElementById('lastUpdated').textContent = 'Failed to load data';
+    console.error(e);
+  }
+}
+
+function render(data) {
+  document.getElementById('lastUpdated').textContent = 'Last updated: ' + new Date(data.last_updated).toLocaleString();
+
+  const countsByType = data.events_by_type_date.reduce((acc, row) => {
+    acc[row.type] = (acc[row.type] || 0) + row.count;
+    return acc;
+  }, {});
+  const total = Object.values(countsByType).reduce((a,b)=>a+b,0);
+
+  const metrics = [
+    {cls:'bg1', title:'Total Events', val: total},
+    {cls:'bg2', title:'Watch Events', val: countsByType['WatchEvent'] || 0},
+    {cls:'bg3', title:'Pull Request Events', val: countsByType['PullRequestEvent'] || 0},
+    {cls:'bg4', title:'Issues Events', val: countsByType['IssuesEvent'] || 0},
+  ];
+  const metricsEl = document.getElementById('metrics');
+  metricsEl.innerHTML = metrics.map(m => `
+    <div class="col-md-3">
+      <div class="metric-card ${m.cls} text-center">
+        <div class="h2 mb-0">${m.val}</div>
+        <div>${m.title}</div>
+      </div>
+    </div>
+  `).join('');
+
+  const tbody = document.getElementById('reposBody');
+  tbody.innerHTML = (data.top_repositories || []).map(r => `
+    <tr>
+      <td class="fw-medium">${r.repo_name}</td>
+      <td>${r.total_events}</td>
+      <td>${r.watches}</td>
+      <td>${r.pull_requests}</td>
+      <td>${r.issues}</td>
+    </tr>
+  `).join('');
+}
+
+document.addEventListener('DOMContentLoaded', loadData);
+setInterval(loadData, 5 * 60 * 1000);
+</script>
+</body>
+</html>
