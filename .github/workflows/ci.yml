@@ -39,7 +39,7 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt || true
           pip install -e .
-          pip install flake8 mypy
+          
 
       - name: Run tests
         env:
@@ -47,13 +47,7 @@ jobs:
         run: |
           pytest -q --tb=short || echo "Tests completed"
 
-      - name: Lint (flake8)
-        run: |
-          flake8 src || true
-
-      - name: Type check (mypy)
-        run: |
-          mypy src || true
+      # Lint and type-check steps removed per request
 
   pages:
     name: Build data and publish Pages dashboard
@@ -93,7 +87,7 @@ jobs:
           PYTHONPATH: ${{ github.workspace }}/src
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           DATABASE_PATH: ./pages_demo.db
-          TARGET_REPOSITORIES: ${{ github.event.inputs.repositories != '' && github.event.inputs.repositories || 'sparesparrow/github-events,sparesparrow/mcp-prompts' }}
+          TARGET_REPOSITORIES: ${{ github.event.inputs.repositories != '' && github.event.inputs.repositories || 'sparesparrow/mcp-prompts' }}
         run: |
           python -m github_events_monitor.api > server.log 2>&1 &
           echo $! > server.pid
