@@ -5,20 +5,32 @@ build-backend = "hatchling.build"
 [project]
 name = "github-events-monitor"
 version = "1.1.0"
-description = "GitHub Events Monitor with FastAPI and MCP server"
+description = "GitHub Events Monitor with FastAPI REST API and MCP server for real-time event tracking and visualization"
 readme = "README.md"
 requires-python = ">=3.11"
 authors = [{ name = "sparesparrow", email = "sparesparrow@protonmail.ch" }]
 license = { text = "MIT" }
-keywords = ["github", "events", "fastapi", "mcp", "monitoring"]
+keywords = ["github", "events", "fastapi", "mcp", "monitoring", "rest-api", "dashboard", "visualization"]
 classifiers = [
+  "Development Status :: 4 - Beta",
+  "Intended Audience :: Developers",
+  "Topic :: Software Development :: Libraries :: Python Modules",
+  "Topic :: System :: Monitoring",
   "Programming Language :: Python :: 3",
   "Programming Language :: Python :: 3 :: Only",
   "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
   "Framework :: FastAPI",
   "License :: OSI Approved :: MIT License",
   "Operating System :: OS Independent",
 ]
+
+[project.urls]
+Homepage = "https://github.com/sparesparrow/github-events-clone"
+Documentation = "https://github.com/sparesparrow/github-events-clone/tree/main/docs"
+Repository = "https://github.com/sparesparrow/github-events-clone"
+Issues = "https://github.com/sparesparrow/github-events-clone/issues"
+Changelog = "https://github.com/sparesparrow/github-events-clone/releases"
 
 # Runtime dependencies (app uses httpx; 'requests' is only for CI/demo scripts)
 dependencies = [
@@ -47,8 +59,8 @@ dev = [
 ]
 
 [project.scripts]
-github-events-monitor-api = "github_events_monitor.api:run"
-github-events-monitor-mcp = "github_events_monitor.mcp_server:run"
+github-events-monitor-api = "src.github_events_monitor.api:run"
+github-events-monitor-mcp = "src.github_events_monitor.mcp_server:run"
 
 [tool.hatch.build]
 packages = ["src/github_events_monitor"]

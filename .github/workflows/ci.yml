@@ -79,14 +79,14 @@ jobs:
           pip install -e .
           pip install requests
 
-      - name: Start API with health check
+      - name: Start API with health check (source module)
         env:
           PYTHONPATH: ${{ github.workspace }}/src
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           DATABASE_PATH: ./pages_demo.db
           TARGET_REPOSITORIES: ${{ github.event.inputs.repositories != '' && github.event.inputs.repositories || 'sparesparrow/mcp-prompts' }}
         run: |
-          python -m github_events_monitor.api > server.log 2>&1 &
+          python -m src.github_events_monitor.api > server.log 2>&1 &
           echo $! > server.pid
           for i in {1..36}; do
             if ! kill -0 "$(cat server.pid)" 2>/dev/null; then

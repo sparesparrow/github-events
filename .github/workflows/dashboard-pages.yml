@@ -45,13 +45,22 @@ jobs:
             sqlite3 database/events.db < database/schema.sql
           fi
 
-      - name: One-time GitHub ingest (populate DB)
+      - name: One-time GitHub ingest (populate DB via source modules)
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          if [ -f service/github_monitor.py ]; then
-            python service/github_monitor.py --once || true
-          fi
+          python - <<'PY'
+          import asyncio, os
+          from src.github_events_monitor.collector import GitHubEventsCollector
+          async def main():
+              db_path = 'database/events.db'
+              token = os.getenv('GITHUB_TOKEN')
+              collector = GitHubEventsCollector(db_path, token)
+              await collector.initialize_database()
+              n = await collector.collect_and_store(limit=200)
+              print(f'Collected {n} events')
+          asyncio.run(main())
+          PY
 
       - name: Start API server
         env:

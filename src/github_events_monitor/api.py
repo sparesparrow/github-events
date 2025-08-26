@@ -21,8 +21,60 @@ import matplotlib.pyplot as plt
 import io
 
 from .collector import GitHubEventsCollector
+from .services import MetricsService, VisualizationService, EventsRepository, HealthReporter
 from pathlib import Path
 from . import mcp_server as mcp_mod
+from .api_endpoints import (
+	ApiEndpoint,
+	HealthEndpoint,
+	CollectEndpoint,
+	WebhookEndpoint,
+	MetricsEventCountsEndpoint,
+	MetricsPrIntervalEndpoint,
+	MetricsRepositoryActivityEndpoint,
+	MetricsTrendingEndpoint,
+	VisualizationTrendingChartEndpoint,
+	VisualizationPrTimelineEndpoint,
+	McpCapabilitiesEndpoint,
+	McpToolsEndpoint,
+	McpResourcesEndpoint,
+	McpPromptsEndpoint,
+)
+
+
+def _route_exists(target, path: str, method: str) -> bool:
+	"""Check if a route with the same path+method already exists on target."""
+	method = method.upper()
+	for r in target.routes:
+		try:
+			if getattr(r, "path", None) == path and method in getattr(r, "methods", set()):
+				return True
+		except Exception:
+			continue
+	return False
+
+
+def _register_endpoints_safely(app: FastAPI) -> None:
+	"""Register endpoint classes using existing handler functions without duplicating routes."""
+	endpoint_objects = [
+		HealthEndpoint(handler=health_check),
+		CollectEndpoint(handler=manual_collect),
+		WebhookEndpoint(handler=github_webhook),
+		MetricsEventCountsEndpoint(handler=get_event_counts),
+		MetricsPrIntervalEndpoint(handler=get_pr_interval),
+		MetricsRepositoryActivityEndpoint(handler=get_repository_activity),
+		MetricsTrendingEndpoint(handler=get_trending_repositories),
+		VisualizationTrendingChartEndpoint(handler=get_trending_chart),
+		VisualizationPrTimelineEndpoint(handler=get_pr_timeline_chart),
+		McpCapabilitiesEndpoint(handler=get_mcp_capabilities),
+		McpToolsEndpoint(handler=list_mcp_tools),
+		McpResourcesEndpoint(handler=list_mcp_resources),
+		McpPromptsEndpoint(handler=list_mcp_prompts),
+	]
+	for ep in endpoint_objects:
+		if not _route_exists(app, ep.path, ep.method):
+			ep.register(app)
+
 
 # Configuration from environment variables
 DATABASE_PATH = os.getenv("DATABASE_PATH", "github_events.db")
@@ -37,13 +89,17 @@ target_repos_env = os.getenv("TARGET_REPOSITORIES")
 if target_repos_env:
 	TARGET_REPOSITORIES = [repo.strip() for repo in target_repos_env.split(",") if repo.strip()]
 
-# Global collector instance
+# Global instances
 collector_instance: Optional[GitHubEventsCollector] = None
+repository_instance: Optional[EventsRepository] = None
+metrics_service: Optional[MetricsService] = None
+visualization_service: Optional[VisualizationService] = None
+health_reporter: Optional[HealthReporter] = None
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
 	"""Application lifespan manager"""
-	global collector_instance
+	global collector_instance, repository_instance, metrics_service, visualization_service, health_reporter
 
 	# Ensure database directory exists if a path component is provided
 	try:
@@ -57,6 +113,12 @@ async def lifespan(app: FastAPI):
 	# Initialize collector
 	collector_instance = GitHubEventsCollector(DATABASE_PATH, GITHUB_TOKEN, target_repositories=TARGET_REPOSITORIES)
 	await collector_instance.initialize_database()
+
+	# Initialize service layer components
+	repository_instance = EventsRepository(DATABASE_PATH)
+	metrics_service = MetricsService(repository_instance)
+	visualization_service = VisualizationService(repository_instance)
+	health_reporter = HealthReporter(repository_instance)
 
 	# Start background polling task
 	polling_task = asyncio.create_task(background_poller())
@@ -77,6 +139,9 @@ app = FastAPI(
 	version="1.0.0",
 	lifespan=lifespan
 )
+
+# Wire endpoint classes to existing handlers (no-op if already present)
+# Note: endpoint classes are registered at the end of this module
 
 # CORS configuration (allow GitHub Pages and configurable origins)
 _cors_origins_env = os.getenv("CORS_ORIGINS", "*")
@@ -172,14 +237,19 @@ async def background_poller():
 
 # API Endpoints
 
-@app.get("/health", response_model=HealthResponse)
+# Health endpoint removed - now registered via HealthEndpoint class only
 async def health_check():
-	"""Health check endpoint"""
+	"""Health check endpoint handler (registered via HealthEndpoint class)"""
+	if health_reporter is None:
+		raise HTTPException(status_code=503, detail="Health reporter not initialized")
+	
+	status_data = await health_reporter.status()
+	
 	return HealthResponse(
-		status="healthy",
+		status=status_data["status"],
 		database_path=DATABASE_PATH,
 		github_token_configured=bool(GITHUB_TOKEN),
-		timestamp=datetime.now(timezone.utc).isoformat()
+		timestamp=status_data["timestamp"]
 	)
 
 @app.post("/collect")
@@ -242,40 +312,37 @@ async def github_webhook(
 
 @app.get("/metrics/event-counts", response_model=EventCountsResponse)
 async def get_event_counts(
-	offset_minutes: int = Query(..., gt=0, description="Number of minutes to look back"),
-	collector: GitHubEventsCollector = Depends(get_collector_instance)
+	offset_minutes: int = Query(..., gt=0, description="Number of minutes to look back")
 ):
 	"""
-	Get total number of events grouped by event type for a given offset.
+	Get total number of events grouped by event type for a given offset using MetricsService.
 	
 	The offset determines how much time we want to look back.
 	For example, offset_minutes=10 means count events from the last 10 minutes.
 	"""
+	if metrics_service is None:
+		raise HTTPException(status_code=503, detail="Metrics service not initialized")
+	
 	try:
-		counts = await collector.get_event_counts_by_type(offset_minutes)
-		total_events = sum(counts.values())
-		
-		return EventCountsResponse(
-			offset_minutes=offset_minutes,
-			total_events=total_events,
-			counts=counts,
-			timestamp=datetime.now(timezone.utc).isoformat()
-		)
+		result = await metrics_service.get_event_counts(offset_minutes)
+		return EventCountsResponse(**result)
 	except Exception as e:
 		raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/metrics/pr-interval", response_model=PRIntervalResponse)
 async def get_pr_interval(
-	repo: str = Query(..., description="Repository name (e.g., 'owner/repo')"),
-	collector: GitHubEventsCollector = Depends(get_collector_instance)
+	repo: str = Query(..., description="Repository name (e.g., 'owner/repo')")
 ):
 	"""
-	Calculate the average time between pull requests for a given repository.
+	Calculate the average time between pull requests for a given repository using MetricsService.
 	
 	Only considers PR 'opened' events for meaningful interval calculation.
 	"""
+	if metrics_service is None:
+		raise HTTPException(status_code=503, detail="Metrics service not initialized")
+	
 	try:
-		result = await collector.get_avg_pr_interval(repo)
+		result = await metrics_service.get_pr_interval(repo)
 		
 		if result is None:
 			return PRIntervalResponse(
@@ -290,12 +357,14 @@ async def get_pr_interval(
 @app.get("/metrics/repository-activity", response_model=RepositoryActivityResponse)
 async def get_repository_activity(
 	repo: str = Query(..., description="Repository name (e.g., 'owner/repo')"),
-	hours: int = Query(24, gt=0, description="Number of hours to look back"),
-	collector: GitHubEventsCollector = Depends(get_collector_instance)
+	hours: int = Query(24, gt=0, description="Number of hours to look back")
 ):
-	"""Get detailed activity summary for a specific repository"""
+	"""Get detailed activity summary for a specific repository using MetricsService"""
+	if metrics_service is None:
+		raise HTTPException(status_code=503, detail="Metrics service not initialized")
+	
 	try:
-		result = await collector.get_repository_activity_summary(repo, hours)
+		result = await metrics_service.get_repository_activity(repo, hours)
 		return RepositoryActivityResponse(**result)
 	except Exception as e:
 		raise HTTPException(status_code=500, detail=str(e))
@@ -303,12 +372,14 @@ async def get_repository_activity(
 @app.get("/metrics/trending", response_model=TrendingRepositoriesResponse)
 async def get_trending_repositories(
 	hours: int = Query(24, gt=0, description="Number of hours to look back"),
-	limit: int = Query(10, gt=0, le=50, description="Maximum number of repositories to return"),
-	collector: GitHubEventsCollector = Depends(get_collector_instance)
+	limit: int = Query(10, gt=0, le=50, description="Maximum number of repositories to return")
 ):
-	"""Get most active repositories by event count"""
+	"""Get most active repositories by event count using MetricsService"""
+	if metrics_service is None:
+		raise HTTPException(status_code=503, detail="Metrics service not initialized")
+	
 	try:
-		trending_data = await collector.get_trending_repositories(hours, limit)
+		trending_data = await metrics_service.get_trending(hours, limit)
 		
 		repositories = [
 			TrendingRepository(**repo_data) for repo_data in trending_data
@@ -326,71 +397,32 @@ async def get_trending_repositories(
 async def get_trending_chart(
 	hours: int = Query(24, gt=0, description="Number of hours to look back"),
 	limit: int = Query(10, gt=0, le=20, description="Number of top repositories"),
-	format: str = Query("png", pattern="^(png|svg)$", description="Image format"),
-	collector: GitHubEventsCollector = Depends(get_collector_instance)
+	format: str = Query("png", pattern="^(png|svg)$", description="Image format")
 ):
 	"""
-	Generate a visualization chart of trending repositories.
+	Generate a visualization chart of trending repositories using VisualizationService.
 	
 	This is the bonus visualization endpoint showing repository activity as a bar chart.
 	"""
+	if visualization_service is None:
+		raise HTTPException(status_code=503, detail="Visualization service not initialized")
+	
 	try:
-		trending_data = await collector.get_trending_repositories(hours, limit)
-		
-		if trending_data is None or len(trending_data) == 0:
-			raise HTTPException(status_code=404, detail="No data found for the specified time period")
-		
-		# Extract data for plotting
-		repo_names = [repo['repo_name'].split('/')[-1][:20] for repo in trending_data]  # Short names
-		event_counts = [repo['total_events'] for repo in trending_data]
-		
-		# Create the chart
-		plt.style.use('default')
-		fig, ax = plt.subplots(figsize=(12, 8))
-		
-		bars = ax.barh(range(len(repo_names)), event_counts, color='steelblue', alpha=0.7)
-		
-		# Customize the chart
-		ax.set_yticks(range(len(repo_names)))
-		ax.set_yticklabels(repo_names)
-		ax.set_xlabel('Number of Events')
-		ax.set_title(f'Most Active GitHub Repositories (Last {hours} Hours)')
-		ax.grid(axis='x', alpha=0.3)
-		
-		# Add value labels on bars
-		for i, (bar, count) in enumerate(zip(bars, event_counts)):
-			width = bar.get_width()
-			ax.text(width + max(event_counts) * 0.01, bar.get_y() + bar.get_height()/2, 
-				   str(count), ha='left', va='center', fontsize=9)
-		
-		plt.tight_layout()
-		
-		# Convert to image
-		img_buffer = io.BytesIO()
-		if format == "svg":
-			plt.savefig(img_buffer, format='svg', bbox_inches='tight', dpi=150)
-			media_type = "image/svg+xml"
-		else:
-			plt.savefig(img_buffer, format='png', bbox_inches='tight', dpi=150)
-			media_type = "image/png"
-		
-		plt.close()
-		
-		img_buffer.seek(0)
+		image_data = await visualization_service.trending_chart(hours, limit, format)
 		
 		# Return image response
 		from fastapi.responses import StreamingResponse
+		media_type = "image/svg+xml" if format == "svg" else "image/png"
 		return StreamingResponse(
-			io.BytesIO(img_buffer.read()),
+			io.BytesIO(image_data),
 			media_type=media_type,
 			headers={
 				"Content-Disposition": f"inline; filename=trending_repos.{format}"
 			}
 		)
 		
-	except HTTPException:
-		# Re-raise HTTP errors like 404 without converting to 500
-		raise
+	except ValueError as e:
+		raise HTTPException(status_code=404, detail=str(e))
 	except Exception as e:
 		raise HTTPException(status_code=500, detail=str(e))
 
@@ -398,53 +430,28 @@ async def get_trending_chart(
 async def get_pr_timeline_chart(
 	repo: str = Query(..., description="Repository name (e.g., 'owner/repo')"),
 	days: int = Query(7, gt=0, le=30, description="Number of days to look back"),
-    format: str = Query("png", pattern="^(png|svg)$", description="Image format"),
-	collector: GitHubEventsCollector = Depends(get_collector_instance)
+    format: str = Query("png", pattern="^(png|svg)$", description="Image format")
 ):
 	"""
-	Generate a timeline visualization of pull request 'opened' events per day.
+	Generate a timeline visualization of pull request 'opened' events per day using VisualizationService.
 	Returns an image (png/svg). 404 if no data in the given window.
 	"""
+	if visualization_service is None:
+		raise HTTPException(status_code=503, detail="Visualization service not initialized")
+	
 	try:
-		series = await collector.get_pr_timeline(repo, days)
-		if not series or sum(item["count"] for item in series) == 0:
-			raise HTTPException(status_code=404, detail="No PR openings found for the specified period")
-
-		# Prepare data
-		dates = [item["date"] for item in series]
-		counts = [item["count"] for item in series]
-
-		# Plot
-		plt.style.use('default')
-		fig, ax = plt.subplots(figsize=(12, 6))
-		ax.plot(dates, counts, marker='o', color='steelblue', linewidth=2)
-		ax.fill_between(dates, counts, color='steelblue', alpha=0.15)
-		ax.set_xlabel('Date')
-		ax.set_ylabel('PRs opened')
-		ax.set_title(f"PR openings per day for {repo} (last {days} days)")
-		ax.grid(axis='y', alpha=0.3)
-		plt.xticks(rotation=45, ha='right')
-		plt.tight_layout()
-
-		# Encode image
-		img_buffer = io.BytesIO()
-		if format == "svg":
-			plt.savefig(img_buffer, format='svg', bbox_inches='tight', dpi=150)
-			media_type = "image/svg+xml"
-		else:
-			plt.savefig(img_buffer, format='png', bbox_inches='tight', dpi=150)
-			media_type = "image/png"
-		plt.close()
-		img_buffer.seek(0)
-
+		image_data = await visualization_service.pr_timeline(repo, format)
+		
+		# Return image response
 		from fastapi.responses import StreamingResponse
+		media_type = "image/svg+xml" if format == "svg" else "image/png"
 		return StreamingResponse(
-			io.BytesIO(img_buffer.read()),
+			io.BytesIO(image_data),
 			media_type=media_type,
 			headers={"Content-Disposition": f"inline; filename=pr_timeline.{format}"}
 		)
-	except HTTPException:
-		raise
+	except ValueError as e:
+		raise HTTPException(status_code=404, detail=str(e))
 	except Exception as e:
 		raise HTTPException(status_code=500, detail=str(e))
 
@@ -512,6 +519,10 @@ async def internal_error_handler(_request, exc):
 		status_code=500,
 		content={"detail": "Internal server error"}
 	)
+
+# Register endpoint classes to existing handlers now that all are defined
+_register_endpoints_safely(app)
+
 
 def run() -> None:
 	"""Synchronous entry point to run the API server with uvicorn.

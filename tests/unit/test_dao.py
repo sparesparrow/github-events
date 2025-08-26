@@ -1,0 +1,264 @@
+"""
+Unit tests for DAO classes
+
+Tests the Data Access Object layer for GitHub Events monitoring.
+"""
+
+import pytest
+import tempfile
+import os
+from datetime import datetime, timezone, timedelta
+from unittest.mock import AsyncMock, Mock, patch
+
+from github_events_monitor.dao import (
+    EventsDao, WatchEventDao, PullRequestEventDao, IssuesEventDao, EventsDaoFactory
+)
+from github_events_monitor.collector import GitHubEvent
+
+
+class TestEventsDao:
+    """Test base EventsDao class"""
+    
+    def test_abstract_base_class(self):
+        """Test that EventsDao cannot be instantiated directly"""
+        with pytest.raises(TypeError):
+            EventsDao("test.db")
+
+
+class TestWatchEventDao:
+    """Test WatchEventDao class"""
+    
+    @pytest.fixture
+    async def watch_dao(self):
+        """Create a WatchEventDao with temporary database"""
+        db_fd, db_path = tempfile.mkstemp(suffix='.db')
+        os.close(db_fd)
+        
+        dao = WatchEventDao(db_path)
+        
+        # Initialize database with test data
+        from github_events_monitor.collector import GitHubEventsCollector
+        collector = GitHubEventsCollector(db_path)
+        await collector.initialize_database()
+        
+        # Add some test data
+        now = datetime.now(timezone.utc)
+        events = [
+            GitHubEvent("1", "WatchEvent", "test/repo1", "user1", now - timedelta(hours=1), {}),
+            GitHubEvent("2", "WatchEvent", "test/repo1", "user2", now - timedelta(hours=2), {}),
+            GitHubEvent("3", "WatchEvent", "test/repo2", "user3", now - timedelta(hours=1), {}),
+        ]
+        await collector.store_events(events)
+        
+        yield dao
+        
+        # Cleanup
+        if os.path.exists(db_path):
+            os.unlink(db_path)
+    
+    def test_event_type(self, watch_dao):
+        """Test that WatchEventDao returns correct event type"""
+        assert watch_dao.event_type == "WatchEvent"
+    
+    async def test_count_by_repo(self, watch_dao):
+        """Test counting watch events by repository"""
+        since_ts = datetime.now(timezone.utc) - timedelta(hours=3)
+        count = await watch_dao.count_by_repo("test/repo1", since_ts)
+        assert count == 2
+        
+        count = await watch_dao.count_by_repo("test/repo2", since_ts)
+        assert count == 1
+    
+    async def test_count_total(self, watch_dao):
+        """Test counting total watch events"""
+        since_ts = datetime.now(timezone.utc) - timedelta(hours=3)
+        count = await watch_dao.count_total(since_ts)
+        assert count == 3
+    
+    async def test_get_star_count_by_repo(self, watch_dao):
+        """Test getting star count for a repository"""
+        since_ts = datetime.now(timezone.utc) - timedelta(hours=3)
+        count = await watch_dao.get_star_count_by_repo("test/repo1", since_ts)
+        assert count == 2
+    
+    async def test_get_top_starred_repos(self, watch_dao):
+        """Test getting top starred repositories"""
+        since_ts = datetime.now(timezone.utc) - timedelta(hours=3)
+        repos = await watch_dao.get_top_starred_repos(since_ts, limit=5)
+        
+        assert len(repos) == 2
+        assert repos[0]["repo_name"] == "test/repo1"
+        assert repos[0]["star_count"] == 2
+        assert repos[1]["repo_name"] == "test/repo2"
+        assert repos[1]["star_count"] == 1
+
+
+class TestPullRequestEventDao:
+    """Test PullRequestEventDao class"""
+    
+    @pytest.fixture
+    async def pr_dao(self):
+        """Create a PullRequestEventDao with temporary database"""
+        db_fd, db_path = tempfile.mkstemp(suffix='.db')
+        os.close(db_fd)
+        
+        dao = PullRequestEventDao(db_path)
+        
+        # Initialize database with test data
+        from github_events_monitor.collector import GitHubEventsCollector
+        collector = GitHubEventsCollector(db_path)
+        await collector.initialize_database()
+        
+        # Add some test data
+        now = datetime.now(timezone.utc)
+        events = [
+            GitHubEvent("1", "PullRequestEvent", "test/repo1", "user1", 
+                       now - timedelta(hours=3), {"action": "opened", "number": 1}),
+            GitHubEvent("2", "PullRequestEvent", "test/repo1", "user2", 
+                       now - timedelta(hours=2), {"action": "opened", "number": 2}),
+            GitHubEvent("3", "PullRequestEvent", "test/repo1", "user3", 
+                       now - timedelta(hours=1), {"action": "opened", "number": 3}),
+            GitHubEvent("4", "PullRequestEvent", "test/repo1", "user1", 
+                       now - timedelta(minutes=30), {"action": "closed", "number": 1}),
+        ]
+        await collector.store_events(events)
+        
+        yield dao
+        
+        # Cleanup
+        if os.path.exists(db_path):
+            os.unlink(db_path)
+    
+    def test_event_type(self, pr_dao):
+        """Test that PullRequestEventDao returns correct event type"""
+        assert pr_dao.event_type == "PullRequestEvent"
+    
+    async def test_get_pr_timestamps(self, pr_dao):
+        """Test getting PR timestamps"""
+        timestamps = await pr_dao.get_pr_timestamps("test/repo1")
+        assert len(timestamps) == 3  # Only opened PRs
+    
+    async def test_get_pr_interval_stats(self, pr_dao):
+        """Test getting PR interval statistics"""
+        stats = await pr_dao.get_pr_interval_stats("test/repo1")
+        
+        assert stats is not None
+        assert stats["repo_name"] == "test/repo1"
+        assert stats["pr_count"] == 3
+        assert stats["avg_interval_seconds"] > 0
+        assert stats["avg_interval_hours"] > 0
+    
+    async def test_get_pr_interval_stats_insufficient_data(self, pr_dao):
+        """Test PR interval stats with insufficient data"""
+        stats = await pr_dao.get_pr_interval_stats("nonexistent/repo")
+        assert stats is None
+
+
+class TestIssuesEventDao:
+    """Test IssuesEventDao class"""
+    
+    @pytest.fixture
+    async def issues_dao(self):
+        """Create an IssuesEventDao with temporary database"""
+        db_fd, db_path = tempfile.mkstemp(suffix='.db')
+        os.close(db_fd)
+        
+        dao = IssuesEventDao(db_path)
+        
+        # Initialize database with test data
+        from github_events_monitor.collector import GitHubEventsCollector
+        collector = GitHubEventsCollector(db_path)
+        await collector.initialize_database()
+        
+        # Add some test data
+        now = datetime.now(timezone.utc)
+        events = [
+            GitHubEvent("1", "IssuesEvent", "test/repo1", "user1", 
+                       now - timedelta(hours=2), {"action": "opened"}),
+            GitHubEvent("2", "IssuesEvent", "test/repo1", "user2", 
+                       now - timedelta(hours=1), {"action": "closed"}),
+            GitHubEvent("3", "IssuesEvent", "test/repo1", "user3", 
+                       now - timedelta(minutes=30), {"action": "reopened"}),
+        ]
+        await collector.store_events(events)
+        
+        yield dao
+        
+        # Cleanup
+        if os.path.exists(db_path):
+            os.unlink(db_path)
+    
+    def test_event_type(self, issues_dao):
+        """Test that IssuesEventDao returns correct event type"""
+        assert issues_dao.event_type == "IssuesEvent"
+    
+    async def test_get_issue_activity_summary(self, issues_dao):
+        """Test getting issue activity summary"""
+        since_ts = datetime.now(timezone.utc) - timedelta(hours=3)
+        summary = await issues_dao.get_issue_activity_summary("test/repo1", since_ts)
+        
+        assert summary["total_issues"] == 3
+        assert summary["activity"]["opened"] == 1
+        assert summary["activity"]["closed"] == 1
+        assert summary["activity"]["reopened"] == 1
+
+
+class TestEventsDaoFactory:
+    """Test EventsDaoFactory class"""
+    
+    def test_get_dao(self):
+        """Test getting DAO instances"""
+        factory = EventsDaoFactory("test.db")
+        
+        # Test getting specific DAOs
+        watch_dao = factory.get_dao("WatchEvent")
+        assert isinstance(watch_dao, WatchEventDao)
+        
+        pr_dao = factory.get_dao("PullRequestEvent")
+        assert isinstance(pr_dao, PullRequestEventDao)
+        
+        issues_dao = factory.get_dao("IssuesEvent")
+        assert isinstance(issues_dao, IssuesEventDao)
+    
+    def test_get_specific_daos(self):
+        """Test getting specific DAO instances"""
+        factory = EventsDaoFactory("test.db")
+        
+        watch_dao = factory.get_watch_dao()
+        assert isinstance(watch_dao, WatchEventDao)
+        
+        pr_dao = factory.get_pr_dao()
+        assert isinstance(pr_dao, PullRequestEventDao)
+        
+        issues_dao = factory.get_issues_dao()
+        assert isinstance(issues_dao, IssuesEventDao)
+    
+    def test_get_all_daos(self):
+        """Test getting all DAO instances"""
+        factory = EventsDaoFactory("test.db")
+        daos = factory.get_all_daos()
+        
+        assert len(daos) == 3
+        assert "WatchEvent" in daos
+        assert "PullRequestEvent" in daos
+        assert "IssuesEvent" in daos
+        
+        assert isinstance(daos["WatchEvent"], WatchEventDao)
+        assert isinstance(daos["PullRequestEvent"], PullRequestEventDao)
+        assert isinstance(daos["IssuesEvent"], IssuesEventDao)
+    
+    def test_unsupported_event_type(self):
+        """Test getting unsupported event type"""
+        factory = EventsDaoFactory("test.db")
+        
+        with pytest.raises(ValueError, match="Unsupported event type"):
+            factory.get_dao("UnsupportedEvent")
+    
+    def test_dao_caching(self):
+        """Test that DAO instances are cached"""
+        factory = EventsDaoFactory("test.db")
+        
+        dao1 = factory.get_dao("WatchEvent")
+        dao2 = factory.get_dao("WatchEvent")
+        
+        assert dao1 is dao2  # Same instance

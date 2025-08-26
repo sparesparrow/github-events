@@ -29,7 +29,7 @@ jobs:
           pip install -r requirements.txt || true
           pip install -e .
 
-      - name: Update DB for provided repositories
+      - name: Update DB for provided repositories via source modules
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           DATABASE_PATH: github_events.db

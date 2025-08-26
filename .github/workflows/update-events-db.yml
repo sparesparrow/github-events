@@ -27,7 +27,7 @@ jobs:
           pip install -r requirements.txt || true
           pip install -e .
 
-      - name: Initialize and update DB
+      - name: Initialize and update DB via source modules
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           DATABASE_PATH: github_events.db

@@ -1,0 +1,81 @@
+"""
+Unit tests for ApiEndpoint classes registration and metadata.
+"""
+
+import pytest
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
+
+from github_events_monitor.api_endpoints import (
+    HealthEndpoint,
+    MetricsEventCountsEndpoint,
+    MetricsPrIntervalEndpoint,
+    MetricsRepositoryActivityEndpoint,
+    MetricsTrendingEndpoint,
+    VisualizationTrendingChartEndpoint,
+    VisualizationPrTimelineEndpoint,
+    CollectEndpoint,
+    WebhookEndpoint,
+    McpCapabilitiesEndpoint,
+    McpToolsEndpoint,
+    McpResourcesEndpoint,
+    McpPromptsEndpoint,
+)
+
+
+@pytest.mark.anyio
+async def test_endpoint_registration_and_metadata():
+    app = FastAPI()
+
+    # Dummy handlers to attach
+    async def health_handler():
+        return {"ok": True}
+
+    async def dummy_handler(**kwargs):
+        return {"ok": True, **kwargs}
+
+    endpoints = [
+        HealthEndpoint(handler=health_handler),
+        MetricsEventCountsEndpoint(handler=dummy_handler),
+        MetricsPrIntervalEndpoint(handler=dummy_handler),
+        MetricsRepositoryActivityEndpoint(handler=dummy_handler),
+        MetricsTrendingEndpoint(handler=dummy_handler),
+        VisualizationTrendingChartEndpoint(handler=dummy_handler),
+        VisualizationPrTimelineEndpoint(handler=dummy_handler),
+        CollectEndpoint(handler=dummy_handler),
+        WebhookEndpoint(handler=dummy_handler),
+        McpCapabilitiesEndpoint(handler=dummy_handler),
+        McpToolsEndpoint(handler=dummy_handler),
+        McpResourcesEndpoint(handler=dummy_handler),
+        McpPromptsEndpoint(handler=dummy_handler),
+    ]
+
+    # Register them and verify routes appear
+    for ep in endpoints:
+        ep.register(app)
+
+    # Quick smoke tests
+    client = TestClient(app)
+    r = client.get("/health")
+    assert r.status_code == 200
+    assert r.json()["ok"] is True
+
+    # Ensure some expected paths exist
+    expected_paths = {
+        ("/metrics/event-counts", "GET"),
+        ("/metrics/pr-interval", "GET"),
+        ("/metrics/repository-activity", "GET"),
+        ("/metrics/trending", "GET"),
+        ("/visualization/trending-chart", "GET"),
+        ("/visualization/pr-timeline", "GET"),
+        ("/collect", "POST"),
+        ("/webhook", "POST"),
+        ("/mcp/capabilities", "GET"),
+        ("/mcp/tools", "GET"),
+        ("/mcp/resources", "GET"),
+        ("/mcp/prompts", "GET"),
+    }
+
+    actual = {(r.path, next(iter(r.methods))) for r in app.routes if hasattr(r, "path") and hasattr(r, "methods")}
+    for p in expected_paths:
+        assert p in actual

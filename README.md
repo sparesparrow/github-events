@@ -67,6 +67,898 @@ python -m src.github_events_monitor.api
 - **🔄 Auto-refresh**: Live updates every 30 seconds
 - **🐛 Debug Console**: Real-time connection and data status
 
+## 📚 Complete Installation & Usage Guide
+
+### 🛠️ Installation Methods
+
+#### Method 1: pip install (Recommended)
+```bash
+# Clone repository
+git clone https://github.com/sparesparrow/github-events-clone.git
+cd github-events-clone
+
+# Install with pip
+pip install -e .
+
+# Or install from requirements.txt
+pip install -r requirements.txt
+```
+
+#### Method 2: uv (Ultra-fast Python package manager)
+```bash
+# Install uv if not already installed
+curl -LsSf https://astral.sh/uv/install.sh | sh
+
+# Install dependencies with uv
+uv pip install -r requirements.txt
+
+# Or install the package in development mode
+uv pip install -e .
+```
+
+#### Method 3: Docker
+```bash
+# Build and run with Docker Compose
+cd docker/
+docker-compose up -d
+
+# Or build manually
+docker build -t github-events-monitor .
+docker run -p 8000:8000 -e GITHUB_TOKEN=your_token github-events-monitor
+```
+
+### 🔧 Environment Configuration
+
+Create a `.env` file in the project root:
+```bash
+# Required for higher API rate limits
+GITHUB_TOKEN=ghp_your_personal_access_token_here
+
+# Optional: Monitor specific repositories
+TARGET_REPOSITORIES=owner/repo1,owner/repo2,owner/repo3
+
+# Database configuration
+DATABASE_PATH=./github_events.db
+
+# API server settings
+API_HOST=0.0.0.0
+API_PORT=8000
+CORS_ORIGINS=*
+
+# Polling interval (seconds)
+POLL_INTERVAL=300
+```
+
+### 🌐 Web Application Usage
+
+#### Starting the API Server
+```bash
+# Method 1: Using the module
+python -m src.github_events_monitor.api
+
+# Method 2: Using the installed script (if installed with pip)
+github-events-monitor-api
+
+# Method 3: With custom configuration
+GITHUB_TOKEN=your_token DATABASE_PATH=./custom.db python -m src.github_events_monitor.api
+```
+
+#### Accessing the Dashboard
+1. **Local HTML Dashboard**: Open `docs/index.html` in your browser
+2. **API Documentation**: Visit `http://localhost:8000/docs`
+3. **Health Check**: Visit `http://localhost:8000/health`
+
+#### REST API Endpoints
+- **Health**: `GET /health`
+- **Event Counts**: `GET /metrics/event-counts?offset_minutes=60`
+- **PR Intervals**: `GET /metrics/pr-interval?repo=owner/repo`
+- **Repository Activity**: `GET /metrics/repository-activity?repo=owner/repo&hours=24`
+- **Trending Repos**: `GET /metrics/trending?hours=24&limit=10`
+- **Visualization**: `GET /visualization/trending-chart?hours=24&limit=5&format=png`
+
+### 🔌 MCP Client Usage
+
+#### Starting the MCP Server
+```bash
+# Method 1: Using the module
+python -m src.github_events_monitor.mcp_server
+
+# Method 2: Using the installed script
+github-events-monitor-mcp
+
+# Method 3: With custom database
+DATABASE_PATH=./custom.db python -m src.github_events_monitor.mcp_server
+```
+
+#### MCP Client Configuration
+
+**For Cursor IDE** (`.cursor/mcp.json`):
+```json
+{
+  "mcpServers": {
+    "github-events": {
+      "command": "python",
+      "args": [
+        "-m", "src.github_events_monitor.mcp_server"
+      ],
+      "cwd": "/path/to/github-events-clone",
+      "env": {
+        "DATABASE_PATH": "./github_events.db",
+        "GITHUB_TOKEN": "your_token_here"
+      }
+    }
+  }
+}
+```
+
+**For Claude Desktop** (`claude_desktop_config.json`):
+```json
+{
+  "mcpServers": {
+    "github-events": {
+      "command": "python",
+      "args": [
+        "-m", "src.github_events_monitor.mcp_server"
+      ],
+      "cwd": "/path/to/github-events-clone",
+      "env": {
+        "DATABASE_PATH": "./github_events.db"
+      }
+    }
+  }
+}
+```
+
+#### Available MCP Tools
+- `get_event_counts(offset_minutes)`: Get event counts by type
+- `get_avg_pr_interval(repo_name)`: Average time between PR events
+- `get_repository_activity(repo_name, hours)`: Activity summary for repository
+- `get_trending_repositories(hours, limit)`: Most active repositories
+- `get_trending_chart_image(hours, limit, format)`: Generate trending chart
+- `get_pr_timeline_chart(repo_name, days, format)`: PR timeline visualization
+- `collect_events_now(limit)`: Trigger manual event collection
+- `get_health()`: Service health status
+
+### 🌊 curl Command Examples
+
+#### Health Check
+```bash
+curl -X GET "http://localhost:8000/health" \
+  -H "accept: application/json"
+```
+
+#### Get Event Counts (Last Hour)
+```bash
+curl -X GET "http://localhost:8000/metrics/event-counts?offset_minutes=60" \
+  -H "accept: application/json"
+```
+
+#### Get Repository Activity
+```bash
+curl -X GET "http://localhost:8000/metrics/repository-activity?repo=microsoft/vscode&hours=24" \
+  -H "accept: application/json"
+```
+
+#### Get Trending Repositories
+```bash
+curl -X GET "http://localhost:8000/metrics/trending?hours=24&limit=10" \
+  -H "accept: application/json"
+```
+
+#### Generate Trending Chart (PNG)
+```bash
+curl -X GET "http://localhost:8000/visualization/trending-chart?hours=24&limit=5&format=png" \
+  -H "accept: image/png" \
+  --output trending_chart.png
+```
+
+#### Trigger Manual Collection
+```bash
+curl -X POST "http://localhost:8000/collect?limit=100" \
+  -H "accept: application/json"
+```
+
+#### Webhook for GitHub Events
+```bash
+curl -X POST "http://localhost:8000/webhook" \
+  -H "Content-Type: application/json" \
+  -H "X-GitHub-Event: watch" \
+  -d '{
+    "action": "started",
+    "repository": {
+      "full_name": "owner/repo",
+      "stargazers_count": 100
+    }
+  }'
+```
+
+### ☁️ AWS Integration
+
+#### S3 Static Website Deployment
+
+1. **Create S3 Bucket**:
+```bash
+aws s3 mb s3://your-github-events-dashboard
+aws s3 website s3://your-github-events-dashboard \
+  --index-document index.html \
+  --error-document error.html
+```
+
+2. **Set Bucket Policy** (replace `your-github-events-dashboard`):
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "PublicReadGetObject",
+      "Effect": "Allow",
+      "Principal": "*",
+      "Action": "s3:GetObject",
+      "Resource": "arn:aws:s3:::your-github-events-dashboard/*"
+    }
+  ]
+}
+```
+
+3. **Deploy Using GitHub Actions**:
+Set these secrets in your GitHub repository:
+- `AWS_ACCESS_KEY_ID`
+- `AWS_SECRET_ACCESS_KEY`
+
+Then trigger the AWS deployment workflow:
+```bash
+# Via GitHub UI: Actions → "Deploy static dashboard to AWS S3" → Run workflow
+# Or via gh CLI:
+gh workflow run aws_deploy.yml \
+  -f s3_bucket=your-github-events-dashboard \
+  -f aws_region=us-east-1 \
+  -f cloudfront_distribution_id=E1234567890
+```
+
+#### EC2 Deployment
+
+**User Data Script** for EC2 instance:
+```bash
+#!/bin/bash
+yum update -y
+yum install -y python3 python3-pip git
+
+# Clone and setup
+cd /opt
+git clone https://github.com/sparesparrow/github-events-clone.git
+cd github-events-clone
+pip3 install -r requirements.txt
+
+# Create systemd service
+cat > /etc/systemd/system/github-events.service << EOF
+[Unit]
+Description=GitHub Events Monitor API
+After=network.target
+
+[Service]
+Type=simple
+User=ec2-user
+WorkingDirectory=/opt/github-events-clone
+Environment=GITHUB_TOKEN=your_token_here
+Environment=API_HOST=0.0.0.0
+Environment=API_PORT=8000
+ExecStart=/usr/bin/python3 -m src.github_events_monitor.api
+Restart=always
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+systemctl enable github-events
+systemctl start github-events
+```
+
+#### Lambda Deployment
+
+**Serverless API with AWS Lambda**:
+```python
+# lambda_function.py
+import json
+from mangum import Mangum
+from src.github_events_monitor.api import app
+
+handler = Mangum(app, lifespan="off")
+
+def lambda_handler(event, context):
+    return handler(event, context)
+```
+
+**Deploy with SAM**:
+```yaml
+# template.yaml
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+
+Resources:
+  GitHubEventsAPI:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: ./
+      Handler: lambda_function.lambda_handler
+      Runtime: python3.11
+      Environment:
+        Variables:
+          GITHUB_TOKEN: !Ref GitHubToken
+      Events:
+        ApiGateway:
+          Type: Api
+          Properties:
+            Path: /{proxy+}
+            Method: ANY
+
+Parameters:
+  GitHubToken:
+    Type: String
+    NoEcho: true
+```
+
+#### RDS Integration
+
+**Environment variables for PostgreSQL**:
+```bash
+export DATABASE_URL="postgresql://username:password@rds-endpoint:5432/github_events"
+export DATABASE_PATH=""  # Leave empty to use DATABASE_URL
+```
+
+**CloudFormation RDS setup**:
+```yaml
+GitHubEventsDB:
+  Type: AWS::RDS::DBInstance
+  Properties:
+    DBInstanceIdentifier: github-events-db
+    DBInstanceClass: db.t3.micro
+    Engine: postgres
+    EngineVersion: '15.4'
+    MasterUsername: github_events
+    MasterUserPassword: !Ref DBPassword
+    AllocatedStorage: '20'
+    VPCSecurityGroups:
+      - !Ref DatabaseSecurityGroup
+```
+
+### 🔄 CI/CD Integration
+
+#### GitHub Actions Secrets Required
+```bash
+# GitHub repository secrets
+GITHUB_TOKEN          # For API access
+AWS_ACCESS_KEY_ID     # For S3 deployment
+AWS_SECRET_ACCESS_KEY # For S3 deployment
+```
+
+#### Custom Deployment Script
+```bash
+#!/bin/bash
+# deploy.sh - Custom deployment script
+
+set -e
+
+echo "🚀 Deploying GitHub Events Monitor..."
+
+# Install dependencies
+pip install -r requirements.txt
+
+# Initialize database
+python -c "
+import asyncio
+from src.github_events_monitor.collector import GitHubEventsCollector
+
+async def init():
+    collector = GitHubEventsCollector('github_events.db', '$GITHUB_TOKEN')
+    await collector.initialize_database()
+    print('✅ Database initialized')
+
+asyncio.run(init())
+"
+
+# Start API server
+echo "🌐 Starting API server..."
+python -m src.github_events_monitor.api &
+API_PID=$!
+
+# Wait for health check
+echo "⏳ Waiting for API to be ready..."
+for i in {1..30}; do
+    if curl -f http://localhost:8000/health >/dev/null 2>&1; then
+        echo "✅ API is healthy"
+        break
+    fi
+    sleep 2
+done
+
+echo "🎉 Deployment complete!"
+echo "📊 Dashboard: http://localhost:8000/docs"
+echo "🔍 Health: http://localhost:8000/health"
+```
+
+```mermaid 
+flowchart TD
+
+%% People
+A["Person: Dashboard User"]:::person
+B["Person: API Consumer"]:::person
+C["Person: MCP Client"]:::person
+
+%% External actors/systems
+MR["Actor: MonitoredRepo (owner/repo)"]:::repo
+G["External System: GitHub API (/events)"]:::external
+
+%% New external actor: MCP Server as tool provider
+MS["Actor: MCP Server (Tool Provider)"]:::actorTool
+
+%% External/configured database actor (variants)
+subgraph DBA["Actor: Database (external/configured)"]
+  direction TB
+  DBF["File: github-events.db"]:::db
+  DBU["URL: postgresql://…  |  sqlite:///…"]:::db
+end
+
+%% System boundary
+subgraph S["Software System: GitHub Events Monitor"]
+  direction TB
+  subgraph Ctrs["Containers"]
+    E["Container: Event Monitor Service\n(Polls /events; filters WatchEvent, PullRequestEvent, IssuesEvent)"]
+    D["Container: Events DB (SQLite)"]
+    F["Container: FastAPI REST API\n(health, metrics, visualization endpoints)"]
+    M["Container: MCP Server\n(tools expose DB-backed metrics & exporters)"]
+    X["Container: Data Exporter\n(writes JSON and charts to docs/)"]
+    P["Container: GitHub Pages (docs/)\n(static dashboard)"]
+  end
+
+  %% Generic Tool abstraction (REST + MCP)
+  subgraph TSG["Generic Tool Abstraction"]
+    direction TB
+    T["Generic Tool (Metrics & Viz)"]:::tool
+
+    %% REST endpoints
+    subgraph RE["REST Endpoints"]
+      direction TB
+      H1["GET /health"]:::endpoint
+      E2["GET /metrics/event-counts?offset_minutes=60"]:::endpoint
+      E1["GET /metrics/pr-interval?repo=owner/repo"]:::endpoint
+      E5["GET /metrics/repository-activity?repo=owner/repo&hours=24"]:::endpoint
+      E6["GET /metrics/trending?hours=24&limit=10"]:::endpoint
+      V1["GET /visualization/trending-chart?hours=24&limit=5&format=png"]:::endpoint
+      DOCS["OpenAPI Docs: /docs"]:::endpoint
+    end
+
+    %% MCP tools (conceptual operations)
+    subgraph MT["MCP Tools"]
+      direction TB
+      MT1["tool: pr_interval"]:::endpoint
+      MT2["tool: event_counts"]:::endpoint
+      MT3["tool: trending_chart"]:::endpoint
+      MT4["tool: pr_timeline"]:::endpoint
+    end
+  end
+end
+
+%% People interactions
+A -->|Views dashboards| P
+B -->|HTTP requests| F
+C -->|Invokes tools| MS
+
+%% Event flow to GitHub
+MR -->|Emits: WatchEvent / PullRequestEvent / IssuesEvent| G
+E -->|GET /events| G
+
+%% Internal DB path
+E -->|writes| D
+F -->|SQL reads| D
+M -->|SQL reads/tools| D
+X -->|reads metrics| D
+X -->|publishes| P
+
+%% External/configured DB options (optional)
+F -.->|alt: reads via DATABASE_URL| DBU
+M -.->|alt: read-only via MCP Postgres| DBU
+E -.->|alt: writes to configured DB| DBU
+X -.->|alt: reads/writes| DBU
+
+%% File-based external usage (optional)
+F -.->|alt: reads file| DBF
+M -.->|alt: reads file| DBF
+
+%% Tool provider behavior: tools proxy to REST endpoints
+MS -->|provides| MT1
+MS -->|provides| MT2
+MS -->|provides| MT3
+MS -->|provides| MT4
+
+%% HTTP calls from MCP Server to REST endpoints
+MS -->|executes HTTP curl| H1
+MS -->|executes HTTP curl| E2
+MS -->|executes HTTP curl| E1
+MS -->|executes HTTP curl| E5
+MS -->|executes HTTP curl| E6
+MS -->|executes HTTP curl| V1
+
+%% Show implementation relation to internal MCP container
+MS -.->|implemented by this repo| M
+
+%% API wiring for completeness
+F -->|exposes| H1
+F -->|exposes| E2
+F -->|exposes| E1
+F -->|exposes| E5
+F -->|exposes| E6
+F -->|exposes| V1
+F -->|exposes| DOCS
+
+B -->|calls| H1
+B -->|calls| E2
+B -->|calls| E1
+B -->|calls| E5
+B -->|calls| E6
+B -->|opens| DOCS
+
+%% Styles
+classDef person fill:#f6f9ff,stroke:#5b8def,stroke-width:1px,color:#1b3a70;
+classDef external fill:#fff7e6,stroke:#f0b429,stroke-width:1px,color:#5a3a00;
+classDef actorTool fill:#f4ffef,stroke:#2ecc71,stroke-width:1px,color:#114d2e;
+classDef tool fill:#eefbf2,stroke:#2ecc71,stroke-width:1px,color:#114d2e;
+classDef endpoint fill:#ffffff,stroke:#bbbbbb,stroke-width:1px,color:#333333;
+classDef repo fill:#fff0f6,stroke:#d6336c,stroke-width:1px,color:#7a1f3b;
+classDef db fill:#eef2ff,stroke:#4c6ef5,stroke-width:1px,color:#243972;
+```
+```mermaid
+flowchart TB
+
+%% People (stacked to reduce width)
+A["Person: Dashboard User"]:::person
+B["Person: API Consumer"]:::person
+C["Person: MCP Client"]:::person
+
+%% External actors/systems (stacked)
+MR["Actor: MonitoredRepo (owner/repo)"]:::repo
+G["External System: GitHub API (/events)"]:::external
+
+%% Tool provider actor (stacked)
+MS["Actor: MCP Server (Tool Provider)"]:::actorTool
+
+%% Database variants (stacked at bottom to avoid width)
+subgraph DBA["Actor: Database (external/configured)"]
+  direction TB
+  DBF["File: github-events.db"]:::db
+  DBU["URL: postgresql://…\nsqlite:///…"]:::db
+end
+
+%% System boundary (make interior vertical)
+subgraph S["Software System: GitHub Events Monitor"]
+  direction TB
+
+  %% Containers stacked to keep narrow
+  E["Container: Event Monitor Service\n(Polls /events; filters Watch, PR, Issues)"]:::internal
+  D["Container: Events DB (SQLite)"]:::internal
+  F["Container: FastAPI REST API\n(health, metrics, visualization)"]:::internal
+  M["Container: MCP Server\n(DB-backed tools & exporters)"]:::internal
+  X["Container: Data Exporter\n(writes JSON & charts to docs/)"]:::internal
+  P["Container: GitHub Pages (docs/)\n(static dashboard)"]:::internal
+
+  %% Collapsed endpoint list (multiline) to reduce width
+  EP["REST Endpoints\n- GET /health\n- GET /metrics/event-counts?offset_minutes=60\n- GET /metrics/pr-interval?repo=owner/repo\n- GET /metrics/repository-activity?repo=owner/repo&hours=24\n- GET /metrics/trending?hours=24&limit=10\n- GET /visualization/trending-chart?hours=24&limit=5&format=png\n- OpenAPI: /docs"]:::endpoint
+
+  %% Collapsed MCP tools list (conceptual) to reduce width
+  MT["MCP Tools\n- tool: pr_interval\n- tool: event_counts\n- tool: trending_chart\n- tool: pr_timeline\n- tool: export_dashboard_html"]:::endpoint
+end
+
+%% People interactions
+A -->|Views dashboards| P
+B -->|HTTP requests| F
+C -->|Invokes tools| MS
+
+%% Event flow (kept vertical)
+MR -->|Emits: Watch / PR / Issues| G
+E -->|GET /events| G
+
+%% Internal DB path (vertical)
+E -->|writes| D
+F -->|SQL reads| D
+M -->|SQL reads/tools| D
+X -->|reads metrics| D
+X -->|publishes| P
+
+%% Compact wiring for endpoints/tools
+F -->|exposes| EP
+M -->|provides| MT
+
+%% Single proxy edge (reduces lateral fan-out)
+MS -->|HTTP proxy for endpoints| F
+
+%% Show implementation relation (dashed, vertical)
+MS -.->|implemented by this repo| M
+
+%% External/configured DB options (optional; placed at bottom to avoid width)
+F -.->|alt: reads via DATABASE_URL| DBU
+M -.->|alt: read-only via MCP Postgres| DBU
+E -.->|alt: writes to configured DB| DBU
+X -.->|alt: reads/writes| DBU
+F -.->|alt: reads file| DBF
+M -.->|alt: reads file| DBF
+
+%% Styles
+classDef person fill:#f6f9ff,stroke:#5b8def,stroke-width:1px,color:#1b3a70;
+classDef external fill:#fff7e6,stroke:#f0b429,stroke-width:1px,color:#5a3a00;
+classDef internal fill:#eefbf2,stroke:#2ecc71,stroke-width:1px,color:#114d2e;
+classDef actorTool fill:#f4ffef,stroke:#2ecc71,stroke-width:1px,color:#114d2e;
+classDef endpoint fill:#ffffff,stroke:#bbbbbb,stroke-width:1px,color:#333333;
+classDef repo fill:#fff0f6,stroke:#d6336c,stroke-width:1px,color:#7a1f3b;
+classDef db fill:#eef2ff,stroke:#4c6ef5,stroke-width:1px,color:#243972;
+
+```
+```mermaid
+flowchart TB
+  %% Title: System Context diagram for GitHub Events Monitor
+
+  %% People (actors)
+  person_dashboard["Person: Dashboard User\nViews published dashboards"]:::person
+  person_api["Person: API Consumer\nCalls REST API for metrics"]:::person
+  person_mcp["Person: MCP Client\nInvokes tools exposed by MCP server"]:::person
+
+  %% Software system in scope
+  system_main["Software System: GitHub Events Monitor\nCollects GitHub events, stores data, exposes metrics, and publishes dashboards"]:::system
+
+  %% External software systems
+  ext_github_api["Software System: GitHub API (/events)\nPublic events stream"]:::external
+  ext_repo["Software System: Monitored Repo (owner/repo)\nEmits Watch/PullRequest/Issues events"]:::external
+  ext_hosting["Software System: Static Hosting (GitHub Pages / S3)\nServes static dashboard from docs/"]:::external
+  ext_db["Software System: External Database (DATABASE_URL)\nOptional Postgres/SQLite via URL"]:::external
+
+  %% Relationships
+  person_dashboard -->|"Views dashboard"| ext_hosting
+  person_api -->|"Calls metrics/visualization endpoints"| system_main
+  person_mcp -->|"Uses MCP tools (proxies to metrics/visualization)"| system_main
+
+  system_main -->|"Publishes static dashboard artifacts"| ext_hosting
+  system_main -->|"Polls public events"| ext_github_api
+  ext_repo -->|"Emits events consumed via /events"| ext_github_api
+
+  %% Optional external DB in addition to internal SQLite
+  system_main -.->|"Optional read/write via DATABASE_URL"| ext_db
+
+  %% Styles
+  classDef person fill:#f6f9ff,stroke:#5b8def,stroke-width:1px,color:#1b3a70;
+  classDef system fill:#eefbf2,stroke:#2ecc71,stroke-width:1px,color:#114d2e;
+  classDef external fill:#fff7e6,stroke:#f0b429,stroke-width:1px,color:#5a3a00;
+
+```
+
+```mermaid
+flowchart TD
+
+%% People
+person_dashboard["Person: Dashboard User"]:::person
+person_api["Person: API Consumer"]:::person
+person_mcp["Person: MCP Client"]:::person
+
+%% External systems
+ext_repo["Software System: Monitored Repo (owner/repo)\nEmits Watch/PullRequest/Issues events"]:::external
+ext_github_api["Software System: GitHub API (/events)\nPublic events stream"]:::external
+ext_pages["Software System: Static Hosting (GitHub Pages/S3)\nServes docs/ dashboard"]:::external
+ext_db["Software System: External Database (DATABASE_URL)\nPostgres/SQLite via URL (optional)"]:::external
+
+%% System in scope
+subgraph system["Software System: GitHub Events Monitor"]
+  em["Container: Event Monitor Service\nPython (poller, GitHub client, filter)\nResponsibility: fetch & persist events"]:::internal
+  api["Container: REST API\nPython FastAPI/Uvicorn\nResponsibility: health, metrics, visualization"]:::internal
+  mcp["Container: MCP Server\nPython (tools map to API)\nResponsibility: tool-based access to metrics/viz"]:::internal
+  db["Container: Events DB\nSQLite file (events.db)\nResponsibility: store events & metrics inputs"]:::internal
+  exporter["Container: Data Exporter\nPython/Plotly\nResponsibility: write JSON + charts to docs/"]:::internal
+  pages["Container: GitHub Pages Site\nStatic HTML/JS in docs/\nResponsibility: publish dashboard"]:::internal
+end
+
+%% People interactions
+person_dashboard -->|"Views dashboards"| pages
+person_api -->|"Calls REST endpoints"| api
+person_mcp -->|"Invokes tools"| mcp
+
+%% Event ingestion
+ext_repo -->|"Emits events"| ext_github_api
+em -->|"Polls /events (HTTP)"| ext_github_api
+
+%% Internal data flows
+em -->|"Writes events"| db
+api -->|"Reads metrics data (SQL)"| db
+mcp -->|"Reads metrics data (SQL)"| db
+exporter -->|"Reads metrics data (SQL)"| db
+exporter -->|"Publishes static data & charts"| pages
+
+%% Optional external DB
+api -.->|"Alt: read via DATABASE_URL (SQL)"| ext_db
+mcp -.->|"Alt: read-only via MCP Postgres"| ext_db
+em -.->|"Alt: write to configured DB"| ext_db
+exporter -.->|"Alt: read for export"| ext_db
+
+%% Styles
+classDef person fill:#f6f9ff,stroke:#5b8def,stroke-width:1px,color:#1b3a70;
+classDef external fill:#fff7e6,stroke:#f0b429,stroke-width:1px,color:#5a3a00;
+classDef internal fill:#eefbf2,stroke:#2ecc71,stroke-width:1px,color:#114d2e;
+```
+
+```mermaid
+flowchart TD
+
+%% Container boundary
+subgraph api["Container: REST API (FastAPI/Uvicorn)"]
+  direction TB
+
+  %% Endpoints / Controllers
+  endpoints["Component: ApiEndpoint classes\n- HealthEndpoint (/health)\n- Metrics* (/metrics/...)\n- Visualization* (/visualization/...)\n- CollectEndpoint (/collect)\n- WebhookEndpoint (/webhook)\n- MCP meta (/mcp/...) "]:::comp
+
+  %% Services
+  metrics_svc["Component: MetricsService\nAggregate counts, PR intervals, activity windows"]:::comp
+  viz_svc["Component: VisualizationService\nBuild images/figures (e.g., Matplotlib/PNG/SVG)"]:::comp
+  health_svc["Component: HealthReporter\nStatus & DB connectivity"]:::comp
+
+  %% Repository / DAO / DB access
+  repo["Component: EventsRepository\nCoordinates data access via DAOs"]:::comp
+  dao_factory["Component: EventsDaoFactory\nCaches DAO instances"]:::comp
+  daos["Component: EventsDao & derived\n- WatchEventDao\n- PullRequestEventDao\n- IssuesEventDao"]:::comp
+  db_pool["Component: DB Connection/Pool\nsqlite3/aiosqlite"]:::comp
+end
+
+%% External/Internal dependencies
+db["Container: Events DB (SQLite)"]:::store
+
+%% Wiring
+endpoints --> metrics_svc
+endpoints --> viz_svc
+endpoints --> health_svc
+metrics_svc --> repo
+viz_svc --> repo
+repo --> dao_factory
+dao_factory --> daos
+daos --> db_pool
+db_pool -->|"SQL (SELECT)"| db
+
+%% Styles
+classDef comp fill:#ffffff,stroke:#888,stroke-width:1px,color:#333;
+classDef store fill:#eef2ff,stroke:#4c6ef5,stroke-width:1px,color:#243972;
+
+```
+```mermaid
+flowchart TD
+
+%% Container boundary
+subgraph api["Container: REST API (FastAPI/Uvicorn)"]
+  direction TB
+
+  %% Endpoints / Controllers
+  endpoints["Component: ApiEndpoint classes\n- Health, Metrics, Visualization\n- Collect & Webhook\n- MCP capabilities/tools/resources/prompts"]:::comp
+
+  %% Services
+  metrics_svc["Component: MetricsService"]:::comp
+  viz_svc["Component: VisualizationService"]:::comp
+  health_svc["Component: HealthReporter"]:::comp
+
+  %% Repository / DAO / DB access
+  repo["Component: EventsRepository"]:::comp
+  dao_factory["Component: EventsDaoFactory"]:::comp
+  daos["Component: EventsDao + (Watch/PR/Issues) DAOs"]:::comp
+  db_pool["Component: DB Connection (aiosqlite)"]:::comp
+end
+
+%% External/Internal dependencies
+db["Container: Events DB (SQLite)"]:::store
+
+%% Wiring
+endpoints --> metrics_svc
+endpoints --> viz_svc
+endpoints --> health_svc
+metrics_svc --> repo
+viz_svc --> repo
+repo --> dao_factory
+dao_factory --> daos
+daos --> db_pool
+db_pool --> db
+
+%% Styles
+classDef comp fill:#ffffff,stroke:#888,stroke-width:1px,color:#333;
+classDef store fill:#eef2ff,stroke:#4c6ef5,stroke-width:1px,color:#243972;
+
+```
+
+```mermaid
+classDiagram
+direction TB
+
+class ApiEndpoint {
+  +path: str
+  +method: str
+  +name: str
+  +summary: str
+  +register(target)
+}
+
+class HealthEndpoint
+class MetricsEventCountsEndpoint
+class MetricsPrIntervalEndpoint
+class MetricsRepositoryActivityEndpoint
+class MetricsTrendingEndpoint
+class VisualizationTrendingChartEndpoint
+class VisualizationPrTimelineEndpoint
+class CollectEndpoint
+class WebhookEndpoint
+class McpCapabilitiesEndpoint
+class McpToolsEndpoint
+class McpResourcesEndpoint
+class McpPromptsEndpoint
+
+ApiEndpoint <|-- HealthEndpoint
+ApiEndpoint <|-- MetricsEventCountsEndpoint
+ApiEndpoint <|-- MetricsPrIntervalEndpoint
+ApiEndpoint <|-- MetricsRepositoryActivityEndpoint
+ApiEndpoint <|-- MetricsTrendingEndpoint
+ApiEndpoint <|-- VisualizationTrendingChartEndpoint
+ApiEndpoint <|-- VisualizationPrTimelineEndpoint
+ApiEndpoint <|-- CollectEndpoint
+ApiEndpoint <|-- WebhookEndpoint
+ApiEndpoint <|-- McpCapabilitiesEndpoint
+ApiEndpoint <|-- McpToolsEndpoint
+ApiEndpoint <|-- McpResourcesEndpoint
+ApiEndpoint <|-- McpPromptsEndpoint
+
+class MetricsService {
+  +get_event_counts(offset_minutes:int) dict
+  +get_pr_interval(repo:str) dict
+  +get_repository_activity(repo:str, hours:int) dict
+  +get_trending(hours:int, limit:int) list
+}
+
+class VisualizationService {
+  +trending_chart(hours:int, limit:int, format:str) bytes
+  +pr_timeline(repo:str, format:str) bytes
+}
+
+class EventsRepository {
+  +count_events_by_type(since_ts:int) dict
+  +pr_timestamps(repo:str) list~datetime~
+  +activity_by_repo(repo:str, since_ts:int) dict
+  +trending_since(since_ts:int, limit:int) list
+}
+
+class EventsDao { <<abstract>> }
+class WatchEventDao
+class PullRequestEventDao
+class IssuesEventDao
+class EventsDaoFactory {
+  +get_dao(type:str) EventsDao
+}
+
+class DBConnection {
+  +execute(sql:str, params:dict) Cursor
+  +fetchall() list
+  +fetchone() any
+}
+
+class HealthReporter {
+  +status() dict
+}
+
+HealthEndpoint ..> HealthReporter : uses
+MetricsEventCountsEndpoint ..> MetricsService : uses
+MetricsPrIntervalEndpoint ..> MetricsService : uses
+MetricsRepositoryActivityEndpoint ..> MetricsService : uses
+MetricsTrendingEndpoint ..> MetricsService : uses
+VisualizationTrendingChartEndpoint ..> VisualizationService : uses
+VisualizationPrTimelineEndpoint ..> VisualizationService : uses
+
+MetricsService --> EventsRepository : queries
+VisualizationService --> EventsRepository : reads data
+EventsRepository --> EventsDaoFactory : gets DAOs
+EventsDaoFactory --> EventsDao : provides
+WatchEventDao --|> EventsDao
+PullRequestEventDao --|> EventsDao
+IssuesEventDao --|> EventsDao
+EventsDao --> DBConnection : SQL (SELECT)
+HealthReporter ..> DBConnection : optional ping
+
+```
 ### 🌐 API Endpoints
 - **Health**: `GET /health`
 - **Event Counts**: `GET /metrics/event-counts?offset_minutes=60`
