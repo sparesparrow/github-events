@@ -9,11 +9,12 @@ import asyncio
 import json
 import os
 from datetime import datetime, timezone
-from typing import Dict, Optional, Any
+from typing import Dict, Optional, Any, List
 
 import httpx
-
 from mcp.server.fastmcp import FastMCP
+from collections import deque
+from dataclasses import dataclass, asdict
 
 """Client configuration: talk to REST API instead of local collector"""
 DATABASE_PATH = os.getenv("DATABASE_PATH", "github_events.db")  # For status display only
@@ -47,15 +48,83 @@ async def initialize_collector():
 
 async def cleanup():
 	"""Cleanup resources"""
-	global http_client
+	global http_client, gh_client
 	if http_client:
 		await http_client.aclose()
 		http_client = None
+	if gh_client:
+		await gh_client.aclose()
+		gh_client = None
 
 async def background_poller():
 	"""Deprecated in client mode: no-op."""
 	# This function is intentionally empty in client mode
 	pass
+
+# ----------------------------
+# Lightweight monitor manager
+# ----------------------------
+MONITORED_TYPES = {"WatchEvent", "PullRequestEvent", "IssuesEvent"}
+
+@dataclass
+class Monitor:
+	id: str
+	repo: str
+	interval_seconds: int
+	types: List[str]
+	started_at: str
+	events: deque
+	task: Optional[asyncio.Task]
+
+monitors: Dict[str, Monitor] = {}
+
+gh_client: Optional[httpx.AsyncClient] = None
+
+async def _ensure_gh_client() -> httpx.AsyncClient:
+	global gh_client
+	if gh_client is None:
+		headers = {
+			"Accept": "application/vnd.github+json",
+			"X-GitHub-Api-Version": "2022-11-28",
+			"User-Agent": "github-events-mcp/1.0",
+		}
+		if GITHUB_TOKEN:
+			headers["Authorization"] = f"Bearer {GITHUB_TOKEN}"
+		gh_client = httpx.AsyncClient(base_url="https://api.github.com", timeout=30, headers=headers)
+	return gh_client
+
+async def _monitor_loop(m: Monitor):
+	client = await _ensure_gh_client()
+	etag: Optional[str] = None
+	url = f"/repos/{m.repo}/events"
+	while True:
+		try:
+			headers = {}
+			if etag:
+				headers["If-None-Match"] = etag
+			resp = await client.get(url, headers=headers)
+			if resp.status_code == 304:
+				await asyncio.sleep(max(5, m.interval_seconds))
+				continue
+			resp.raise_for_status()
+			etag = resp.headers.get("ETag", etag)
+			data = resp.json() or []
+			for e in data:
+				if e.get("type") not in m.types:
+					continue
+				m.events.appendleft({
+					"id": e.get("id"),
+					"type": e.get("type"),
+					"repo": (e.get("repo") or {}).get("name"),
+					"actor": (e.get("actor") or {}).get("login"),
+					"created_at": e.get("created_at"),
+				})
+				if len(m.events) > 1000:
+					m.events.pop()
+		except Exception:
+			await asyncio.sleep(max(10, m.interval_seconds))
+		else:
+			await asyncio.sleep(max(5, m.interval_seconds))
 
 # MCP Tools - Model-controlled functions
 
@@ -553,6 +622,90 @@ def _assess_activity_level(total_events: int, hours: int) -> str:
 		return "High activity"
 	else:
 		return "Very high activity"
+
+# ----------------------------
+# Lightweight monitor manager
+# ----------------------------
+
+@mcp.tool()
+async def add_monitor(repo: str, interval_seconds: int = 60, types: Optional[str] = None) -> Dict[str, Any]:
+	"""
+	Start a lightweight monitor that polls GitHub repo events in the background.
+
+	Args:
+	  repo: Repository in the form "owner/repo".
+	  interval_seconds: Poll interval (default 60s).
+	  types: Comma-separated event types to include (default WatchEvent,PullRequestEvent,IssuesEvent).
+	"""
+	repo = (repo or "").strip()
+	if not repo or "/" not in repo:
+		return {"success": False, "error": "repo must be in 'owner/repo' format"}
+	try:
+		selected = [t.strip() for t in (types.split(",") if types else []) if t.strip()] or list(MONITORED_TYPES)
+		for t in selected:
+			if t not in MONITORED_TYPES:
+				return {"success": False, "error": f"Unsupported type: {t}. Allowed: {sorted(MONITORED_TYPES)}"}
+		monitor_id = f"mon-{repo}-{int(datetime.now(timezone.utc).timestamp())}"
+		m = Monitor(
+			id=monitor_id,
+			repo=repo,
+			interval_seconds=max(5, int(interval_seconds or 60)),
+			types=selected,
+			started_at=datetime.now(timezone.utc).isoformat(),
+			events=deque(),
+			task=None,
+		)
+		task = asyncio.create_task(_monitor_loop(m))
+		m.task = task
+		monitors[monitor_id] = m
+		return {"success": True, "monitor": {k: (list(v) if hasattr(v, 'appendleft') else v) for k, v in asdict(m).items() if k != "task"}}
+	except Exception as e:
+		return {"success": False, "error": str(e)}
+
+@mcp.tool()
+async def get_active_monitors() -> Dict[str, Any]:
+	"""Return a list of active monitors and their metadata."""
+	data = []
+	for m in monitors.values():
+		d = asdict(m)
+		d.pop("task", None)
+		d["events"] = list(m.events)[:5]
+		d["buffer_size"] = len(m.events)
+		data.append(d)
+	return {"success": True, "monitors": data}
+
+@mcp.tool()
+async def stop_monitor(monitor_id: str) -> Dict[str, Any]:
+	"""Stop and remove a running monitor by id."""
+	m = monitors.get(monitor_id)
+	if not m:
+		return {"success": False, "error": "monitor not found"}
+	try:
+		if m.task and not m.task.done():
+			m.task.cancel()
+			try:
+				await m.task
+			except asyncio.CancelledError:
+				pass
+		monitors.pop(monitor_id, None)
+		return {"success": True, "stopped": monitor_id}
+	except Exception as e:
+		return {"success": False, "error": str(e)}
+
+@mcp.tool()
+async def getEvents(monitor_id: str, limit: int = 100) -> Dict[str, Any]:
+	"""
+	Get the most recent collected events for a monitor.
+
+	Args:
+	  monitor_id: The id returned by add_monitor
+	  limit: Max number of events to return (default 100)
+	"""
+	m = monitors.get(monitor_id)
+	if not m:
+		return {"success": False, "error": "monitor not found"}
+	limit = max(1, min(int(limit or 100), 1000))
+	return {"success": True, "monitor_id": monitor_id, "events": list(m.events)[:limit], "total_buffer": len(m.events)}
 
 # Server lifecycle management
 async def main():

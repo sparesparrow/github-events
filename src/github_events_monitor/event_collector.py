@@ -11,45 +11,17 @@ import logging
 import statistics
 from datetime import datetime, timedelta, timezone
 from typing import Dict, List, Optional, Any, Tuple, AsyncIterator, AsyncGenerator
-from dataclasses import dataclass, asdict
 from contextlib import asynccontextmanager
 
 import httpx
 import aiosqlite
-from .dao import SchemaDao, EventsWriteDao, AggregatesDao
-from .database import DatabaseManager
+from .database import SchemaDao, EventsWriteDao, AggregatesDao, DatabaseManager
+from .event import GitHubEvent
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-@dataclass
-class GitHubEvent:
-	"""Represents a GitHub Event with relevant fields"""
-	id: str
-	event_type: str
-	repo_name: str
-	actor_login: str
-	created_at: datetime
-	payload: Dict[str, Any]
-	
-	def to_dict(self) -> Dict[str, Any]:
-		"""Convert to dictionary for JSON serialization"""
-		result = asdict(self)
-		result['created_at'] = self.created_at.isoformat()
-		return result
-	
-	@classmethod
-	def from_api_data(cls, data: Dict[str, Any]) -> 'GitHubEvent':
-		"""Create GitHubEvent from GitHub API response data"""
-		return cls(
-			id=data['id'],
-			event_type=data['type'],
-			repo_name=data['repo']['name'],
-			actor_login=data['actor']['login'],
-			created_at=datetime.fromisoformat(data['created_at'].replace('Z', '+00:00')),
-			payload=data.get('payload', {})
-		)
 
 class GitHubEventsCollector:
 	"""

@@ -13,7 +13,8 @@ from unittest.mock import Mock, patch
 
 import aiosqlite
 
-from ..collector import GitHubEventsCollector, GitHubEvent  # type: ignore
+from ..event_collector import GitHubEventsCollector  # type: ignore
+from ..event import GitHubEvent  # type: ignore
 
 
 class TestGitHubEvent:

@@ -22,14 +22,14 @@ import io
 import logging
 import aiosqlite
 
-from .collector import GitHubEventsCollector
+from .event_collector import GitHubEventsCollector
 from pathlib import Path
 # MCP integration may live outside the package after cleanup; import defensively
 try:
 	from . import mcp_server as mcp_mod  # type: ignore
 except Exception:  # pragma: no cover - optional dependency
 	mcp_mod = None  # type: ignore
-from .dao import EventsDaoFactory, AggregatesDao
+from .database import EventsDaoFactory, AggregatesDao
 
 
 def _route_exists(target, path: str, method: str) -> bool:
@@ -693,7 +693,7 @@ async def github_webhook(
 		if event_type not in {"WatchEvent", "PullRequestEvent", "IssuesEvent"}:
 			return {"status": "ignored"}
 		# Convert single event into GitHubEvent and store
-		from .collector import GitHubEvent
+		from .event import GitHubEvent
 		try:
 			repo = payload.get("repository") or {}
 			actor = payload.get("sender") or payload.get("actor") or {}

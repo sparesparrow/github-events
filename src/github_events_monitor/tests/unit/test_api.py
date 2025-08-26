@@ -15,7 +15,8 @@ from fastapi import status
 
 # Import our API
 from ...api import app
-from ...collector import GitHubEventsCollector, GitHubEvent
+from ...event_collector import GitHubEventsCollector
+from ...event import GitHubEvent
 
 
 class TestAPI:

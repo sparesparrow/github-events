@@ -16,7 +16,8 @@ from unittest.mock import Mock, patch
 import httpx
 from fastapi.testclient import TestClient
 
-from ...collector import GitHubEventsCollector, GitHubEvent
+from ...event_collector import GitHubEventsCollector
+from ...event import GitHubEvent
 from ...api import app
 
 
