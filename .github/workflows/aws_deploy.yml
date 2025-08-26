@@ -1,4 +1,4 @@
-name: Deploy static dashboard to AWS S3
+name: (DISABLED) Deploy static dashboard to AWS S3
 
 on:
   workflow_dispatch:
@@ -24,6 +24,7 @@ permissions:
 
 jobs:
   build-pages-artifacts:
+    if: false  # disabled in favor of GitHub Pages deployment
     name: Build dashboard artifacts
     runs-on: ubuntu-latest
     steps:
@@ -99,6 +100,7 @@ jobs:
           path: pages_content/
 
   deploy-to-s3:
+    if: false
     name: Sync to S3 and invalidate CloudFront
     needs: build-pages-artifacts
     runs-on: ubuntu-latest

@@ -1,0 +1,34 @@
+{
+  "name": "github-events-dashboard",
+  "version": "1.0.0",
+  "description": "A Python-based service that monitors GitHub Events (WatchEvent, PullRequestEvent, IssuesEvent), stores them in SQLite, exposes data through an MCP server (each tool = API endpoint), and publishes interactive visualizations to a GitHub Pages site from the docs/ folder.",
+  "main": "index.js",
+  "directories": {
+    "doc": "docs",
+    "example": "examples",
+    "test": "tests"
+  },
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "serve": "npx http-server docs -p 8080 -c-1",
+    "cy:run": "cypress run --config-file cypress.config.cjs",
+    "cy:open": "cypress open --config-file cypress.config.cjs"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/sparesparrow/github-events.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/sparesparrow/github-events/issues"
+  },
+  "homepage": "https://github.com/sparesparrow/github-events#readme",
+  "private": "true",
+  "devDependencies": {
+    "cypress": "^13.13.1",
+    "http-server": "^14.1.1"
+  },
+  "type": "module"
+}

@@ -445,7 +445,17 @@
                 // Extract data
                 const counts60 = eventCounts60Result.data;
                 const counts10 = eventCounts10Result.data;
-                const trending = trendingResult.data.repositories || trendingResult.data;
+                const trendingRaw = trendingResult.data;
+                let trending = [];
+                if (Array.isArray(trendingRaw)) {
+                    trending = trendingRaw;
+                } else if (trendingRaw && Array.isArray(trendingRaw.repositories)) {
+                    trending = trendingRaw.repositories;
+                } else if (trendingRaw && trendingRaw.data && Array.isArray(trendingRaw.data.repositories)) {
+                    trending = trendingRaw.data.repositories;
+                } else {
+                    trending = [];
+                }
 
                 log(`📊 Data loaded - 60min: ${JSON.stringify(counts60)}, Trending repos: ${trending.length}`);
 
@@ -536,7 +546,16 @@
 
             // Render repositories table
             const tbody = document.getElementById('repos-tbody');
-            tbody.innerHTML = trending.slice(0, 10).map((repo, index) => `
+            const repos = (Array.isArray(trending) ? trending : []);
+            if (repos.length === 0) {
+                tbody.innerHTML = `
+                    <tr>
+                        <td colspan="6" class="text-center text-muted">No trending data available</td>
+                    </tr>
+                `;
+                return;
+            }
+            tbody.innerHTML = repos.slice(0, 10).map((repo, index) => `
                 <tr>
                     <td class="repo-name">
                         <span class="badge bg-primary me-2">${index + 1}</span>

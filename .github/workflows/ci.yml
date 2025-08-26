@@ -2,15 +2,10 @@ name: CI and Pages
 
 on:
   push:
-    branches: [ main, develop ]
+    branches: [ main ]
   pull_request:
     branches: [ main ]
   workflow_dispatch:
-    inputs:
-      repositories:
-        description: "Comma-separated repos (owner/repo) to visualize"
-        required: false
-        default: ""
 
 env:
   PYTHON_VERSION: '3.11'
@@ -64,6 +59,8 @@ jobs:
     environment:
       name: github-pages
       url: ${{ steps.deploy.outputs.page_url }}
+    outputs:
+      page_url: ${{ steps.deploy.outputs.page_url }}
 
     steps:
       - name: Checkout
@@ -435,3 +432,28 @@ jobs:
         if: always()
         run: |
           if [ -f server.pid ] ; then kill "$(cat server.pid)" 2>/dev/null || true ; rm -f server.pid ; fi
+
+  e2e:
+    name: E2E - Cypress against deployed Pages
+    needs: pages
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install dependencies
+        run: |
+          npm ci || npm i
+
+      - name: Verify deployed URL
+        run: |
+          echo "Deployed URL: ${{ needs.pages.outputs.page_url }}"
+
+      - name: Run Cypress (production URL)
+        run: npx cypress run --browser electron --headless --config baseUrl=${{ needs.pages.outputs.page_url }} --spec cypress/e2e/pages_deploy.cy.js

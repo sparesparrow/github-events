@@ -1,0 +1,58 @@
+name: Update GitHub Events Database (scheduled)
+
+on:
+  schedule:
+    - cron: '0 * * * *'
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+
+jobs:
+  update-db:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt || true
+          pip install -e .
+
+      - name: Initialize and update DB
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          DATABASE_PATH: github_events.db
+        run: |
+          python - <<'PY'
+          import asyncio
+          from src.github_events_monitor.collector import GitHubEventsCollector
+          async def main():
+              collector = GitHubEventsCollector('github_events.db', '${{ secrets.GITHUB_TOKEN }}')
+              await collector.initialize_database()
+              n = await collector.collect_and_store(limit=200)
+              print(f'Collected {n} events')
+          asyncio.run(main())
+          PY
+
+      - name: Commit DB changes (optional)
+        run: |
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Action"
+          if git diff --quiet github_events.db; then
+            echo "No DB changes"
+          else
+            git add github_events.db
+            git commit -m "Update events DB ($(date -u --iso-8601=seconds))"
+            git push
+          fi
+
+

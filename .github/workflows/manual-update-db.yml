@@ -1,0 +1,65 @@
+name: Manual DB Update for Specific Repositories
+
+on:
+  workflow_dispatch:
+    inputs:
+      repositories:
+        description: "Comma-separated list of repos (owner/repo,owner/repo2)"
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  manual-update:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt || true
+          pip install -e .
+
+      - name: Update DB for provided repositories
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          DATABASE_PATH: github_events.db
+          TARGET_REPOSITORIES: ${{ inputs.repositories }}
+        run: |
+          python - <<'PY'
+          import asyncio, os
+          from src.github_events_monitor.collector import GitHubEventsCollector
+          repos = os.getenv('TARGET_REPOSITORIES','').split(',') if os.getenv('TARGET_REPOSITORIES') else []
+          print('Target repos:', repos)
+          async def main():
+              collector = GitHubEventsCollector('github_events.db', '${{ secrets.GITHUB_TOKEN }}')
+              await collector.initialize_database()
+              if repos:
+                  collector.target_repositories = [r.strip() for r in repos if r.strip()]
+              n = await collector.collect_and_store(limit=300)
+              print(f'Collected {n} events (manual run)')
+          asyncio.run(main())
+          PY
+
+      - name: Commit DB changes (optional)
+        run: |
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Action"
+          if git diff --quiet github_events.db; then
+            echo "No DB changes"
+          else
+            git add github_events.db
+            git commit -m "Manual DB update for repos: ${{ inputs.repositories }}"
+            git push
+          fi
+
+
