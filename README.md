@@ -25,7 +25,35 @@ The service can be configured via environment variables:
 - `DATABASE_PATH`: Path to SQLite database file
 - `POLL_INTERVAL`: Polling interval in seconds (default: 300)
 
-## Setup
+## Quickstart (REST API)
+
+1) Python env
+- python -m venv .venv
+- source .venv/bin/activate
+- pip install -r requirements.txt
+
+2) Run the REST API
+- export DATABASE_PATH="database/events.db"
+- export GITHUB_TOKEN="<optional PAT for higher rate limits>"
+- export TARGET_REPOSITORIES="owner/repo1,owner/repo2"   # optional
+- uvicorn github_events_monitor.api:app --host 0.0.0.0 --port 8000
+
+3) Collect events
+- POST http://localhost:8000/collect
+- Or let the background poller run (default every 5 minutes; change via POLL_INTERVAL)
+
+4) Metrics endpoints
+- GET /metrics/event-counts?offset_minutes=60
+- GET /metrics/pr-interval?repo=owner/repo
+- GET /metrics/repository-activity?repo=owner/repo&hours=24
+- GET /metrics/trending?hours=24&limit=10
+
+5) Visualization (bonus)
+- GET /visualization/trending-chart?hours=24&limit=5&format=png
+
+Interactive docs: open http://localhost:8000/docs
+
+## Setup (Monitor and Dashboard)
 
 1) Python env
 - python -m venv venv
@@ -93,6 +121,28 @@ Comprehensive documentation is available in the `docs/` directory:
 - **DEPLOYMENT.md**: Deployment guides and configurations
 - **WORKFLOWS.md**: CI/CD workflow documentation
 - **diagram.md**: System architecture diagrams
+
+## Assumptions
+
+- GitHub API public events endpoint `/events` is used for general monitoring; optional per-repo events endpoints are used when `TARGET_REPOSITORIES` is set.
+- SQLite is sufficient for this assignment; for production, a managed SQL database and a retention policy are recommended.
+- Metrics are computed from stored events; freshness depends on poll cadence or manual collection.
+- Authentication to this REST API is not required for the assignment scope. Provide a `GITHUB_TOKEN` to increase GitHub rate limits.
+
+## C4 Model (Level 1)
+
+System Context describing key containers and interactions:
+
+```mermaid
+graph TD
+    A["Person: API Consumer"] -->|HTTP| B["Container: FastAPI REST API"]
+    A2["Person: Dashboard User"] -->|HTTPS| D["Container: GitHub Pages (docs/)"]
+    B -->|SQL| C["Container: Events DB (SQLite)"]
+    E["Container: Event Monitor Service"] -->|writes| C
+    E -->|GET /events| F["External System: GitHub API"]
+    G["Container: Data Exporter"] -->|reads| C
+    G -->|publishes| D
+```
 
 ## AWS Static Hosting (S3 + optional CloudFront)
 

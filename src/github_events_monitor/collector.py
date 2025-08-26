@@ -10,7 +10,7 @@ import json
 import logging
 import statistics
 from datetime import datetime, timedelta, timezone
-from typing import Dict, List, Optional, Any, Tuple
+from typing import Dict, List, Optional, Any, Tuple, AsyncIterator, AsyncGenerator
 from dataclasses import dataclass, asdict
 from contextlib import asynccontextmanager
 
@@ -570,11 +570,12 @@ class GitHubEventsCollector:
 			return await self.store_events(events)
 
 # Async context manager for the collector
+
 @asynccontextmanager
 async def get_collector(
 	db_path: str = "github_events.db",
 	github_token: Optional[str] = None
-) -> GitHubEventsCollector:
+) -> AsyncGenerator["GitHubEventsCollector", None]:
 	"""Async context manager for GitHubEventsCollector"""
 	collector = GitHubEventsCollector(db_path, github_token)
 	await collector.initialize_database()
