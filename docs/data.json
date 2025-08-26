@@ -1,19 +1,19 @@
 {
   "events_by_type_date": [
     {
-      "type": "WatchEvent",
-      "day": "2025-08-26",
-      "count": 8
-    },
-    {
       "type": "PullRequestEvent",
       "day": "2025-08-26",
-      "count": 15
+      "count": 11
     },
     {
       "type": "IssuesEvent",
       "day": "2025-08-26",
-      "count": 3
+      "count": 4
+    },
+    {
+      "type": "WatchEvent",
+      "day": "2025-08-26",
+      "count": 5
     }
   ],
   "top_repositories": [
@@ -40,6 +40,13 @@
     },
     {
       "repo_name": "EuCarlos/attributes",
+      "total_events": 1,
+      "watches": 0,
+      "pull_requests": 1,
+      "issues": 0
+    },
+    {
+      "repo_name": "GridProtectionAlliance/SystemCenter",
       "total_events": 1,
       "watches": 0,
       "pull_requests": 1,
@@ -149,14 +156,7 @@
       "watches": 0,
       "pull_requests": 1,
       "issues": 0
-    },
-    {
-      "repo_name": "direwolf-github/ephemeral-ci-06ea5f1f",
-      "total_events": 1,
-      "watches": 0,
-      "pull_requests": 1,
-      "issues": 0
     }
   ],
-  "last_updated": "2025-08-26T04:02:40.211825+00:00"
+  "last_updated": "2025-08-26T04:22:39.607777+00:00"
 }

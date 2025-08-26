@@ -314,6 +314,15 @@
             const apiUrl = document.getElementById('api-url').value;
             const statusEl = document.getElementById('connection-status');
             
+            // If no API URL configured (GitHub Pages case), skip API and use static files
+            if (!apiUrl || apiUrl.trim() === '') {
+                const isGitHubPages = window.location.hostname === 'sparesparrow.github.io';
+                statusEl.innerHTML = `<div class="alert alert-info"><i class="fas fa-info-circle me-2"></i>📁 ${isGitHubPages ? 'GitHub Pages' : 'Local'} Mode - Using static data files</div>`;
+                log(`📁 No API URL configured, using static files (${isGitHubPages ? 'GitHub Pages' : 'Local'} mode)`);
+                useStaticFallback = true;
+                return false;
+            }
+            
             try {
                 log(`🔍 Testing API connection to ${apiUrl}...`);
                 const response = await fetch(`${apiUrl}/health`, {
@@ -568,7 +577,19 @@
             apiBaseUrl = CONFIG.API.BASE_URL;
             document.getElementById('api-url').value = apiBaseUrl;
             
-            log(`📋 Configuration loaded: API=${apiBaseUrl}, Fallback=${CONFIG.STATIC_FALLBACK.enabled}`);
+            // Auto-detect environment and set fallback mode
+            const isGitHubPages = window.location.hostname === 'sparesparrow.github.io';
+            const isLocalFile = window.location.protocol === 'file:';
+            const hasApiUrl = apiBaseUrl && apiBaseUrl.trim() !== '';
+            
+            if (!hasApiUrl) {
+                useStaticFallback = true;
+                log(`📁 Environment: ${isGitHubPages ? 'GitHub Pages' : isLocalFile ? 'Local File' : 'Unknown'} - Starting in static mode`);
+            } else {
+                log(`🔗 API configured: ${apiBaseUrl} - Will attempt live connection`);
+            }
+            
+            log(`📋 Configuration loaded: API=${apiBaseUrl}, Fallback=${CONFIG.STATIC_FALLBACK.enabled}, StaticMode=${useStaticFallback}`);
             loadDashboardData();
         });
         

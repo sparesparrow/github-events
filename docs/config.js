@@ -4,14 +4,17 @@
 window.GITHUB_EVENTS_CONFIG = {
     // Primary API endpoints for live data
     API: {
-        // Change this to your API server URL
-        BASE_URL: 'http://localhost:8000',
+        // Auto-detect environment: use localhost for local development, disable for GitHub Pages
+        BASE_URL: (window.location.protocol === 'file:' || window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') 
+            ? 'http://localhost:8000' 
+            : '', // Empty for GitHub Pages - will use static files
         
         // Alternative public API endpoints (if available)
         ALTERNATIVE_URLS: [
-            'https://your-api-server.herokuapp.com',
-            'http://your-vps:8000',
-            // Add your own API server URLs here
+            // Add your deployed API server URLs here
+            // 'https://your-api-server.herokuapp.com',
+            // 'https://your-api-server.railway.app',
+            // 'http://your-vps:8000',
         ],
         
         // API endpoint paths
