@@ -1,0 +1,81 @@
+name: Daily Metrics Export
+
+on:
+  schedule:
+    # Run daily at 2 AM UTC
+    - cron: '0 2 * * *'
+  workflow_dispatch:
+
+jobs:
+  health-check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt || true
+          pip install -e .
+
+      - name: Health Check
+        env:
+          DATABASE_PATH: github_events.db
+        run: |
+          python scripts/health_check.py --exit-on-error
+
+  export-metrics:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    needs: health-check
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt || true
+          pip install -e .
+
+      - name: Export Metrics
+        env:
+          DATABASE_PATH: github_events.db
+        run: |
+          python scripts/export_metrics.py \
+            --output daily_metrics.json \
+            --hours 24 \
+            --trending-limit 20
+
+      - name: Upload Metrics Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: daily-metrics-${{ github.run_number }}
+          path: daily_metrics.json
+          retention-days: 30
+
+      - name: Create Metrics Summary
+        run: |
+          echo "## Daily Metrics Summary" >> $GITHUB_STEP_SUMMARY
+          echo "**Generated:** $(date -u)" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          if [ -f daily_metrics.json ]; then
+            echo "**Total Events:** $(jq -r '.event_counts.total_events' daily_metrics.json)" >> $GITHUB_STEP_SUMMARY
+            echo "**Top Repository:** $(jq -r '.trending_repositories[0].repo_name' daily_metrics.json)" >> $GITHUB_STEP_SUMMARY
+            echo "**Top Repository Events:** $(jq -r '.trending_repositories[0].total_events' daily_metrics.json)" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "❌ Metrics file not found" >> $GITHUB_STEP_SUMMARY
+          fi

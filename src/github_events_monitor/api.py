@@ -7,7 +7,7 @@ FastAPI application providing REST endpoints for GitHub Events monitoring metric
 import os
 import asyncio
 from datetime import datetime, timezone
-from typing import Dict, List, Optional, Any
+from typing import Dict, List, Optional, Any, Awaitable, Callable, Union
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, HTTPException, BackgroundTasks, Query, Depends
@@ -19,27 +19,13 @@ import matplotlib
 matplotlib.use('Agg')  # Use non-interactive backend for server
 import matplotlib.pyplot as plt
 import io
+import logging
+import aiosqlite
 
 from .collector import GitHubEventsCollector
-from .services import MetricsService, VisualizationService, EventsRepository, HealthReporter
 from pathlib import Path
 from . import mcp_server as mcp_mod
-from .api_endpoints import (
-	ApiEndpoint,
-	HealthEndpoint,
-	CollectEndpoint,
-	WebhookEndpoint,
-	MetricsEventCountsEndpoint,
-	MetricsPrIntervalEndpoint,
-	MetricsRepositoryActivityEndpoint,
-	MetricsTrendingEndpoint,
-	VisualizationTrendingChartEndpoint,
-	VisualizationPrTimelineEndpoint,
-	McpCapabilitiesEndpoint,
-	McpToolsEndpoint,
-	McpResourcesEndpoint,
-	McpPromptsEndpoint,
-)
+from .dao import EventsDaoFactory, AggregatesDao
 
 
 def _route_exists(target, path: str, method: str) -> bool:
@@ -74,6 +60,420 @@ def _register_endpoints_safely(app: FastAPI) -> None:
 	for ep in endpoint_objects:
 		if not _route_exists(app, ep.path, ep.method):
 			ep.register(app)
+
+
+# ------------------------- Inlined API Endpoints -----------------------------
+
+HttpHandler = Callable[..., Awaitable[Any]]
+RouteTarget = Union[FastAPI, 'APIRouter']
+
+
+class ApiEndpoint:
+	"""Base class for REST API endpoints.
+	
+	Encapsulates route metadata and provides a method to register the endpoint
+	on a FastAPI application or router.
+	"""
+	
+	def __init__(self, path: str, method: str, name: str, summary: str, handler: Optional[HttpHandler] = None) -> None:
+		self.path = path
+		self.method = method.upper()
+		self.name = name
+		self.summary = summary
+		self._handler = handler
+	
+	def get_handler(self) -> HttpHandler:
+		"""Return the async handler callable for this endpoint."""
+		if self._handler is None:
+			async def _not_configured(**kwargs: Any) -> Dict[str, Any]:
+				return {"error": f"{self.name} handler not configured", **kwargs}
+			return _not_configured
+		return self._handler
+	
+	def register(self, target: RouteTarget) -> None:
+		"""Register this endpoint on the provided FastAPI app or APIRouter."""
+		target.add_api_route(
+			self.path,
+			self.get_handler(),
+			methods=[self.method],
+			name=self.name,
+			summary=self.summary,
+		)
+
+
+class HealthEndpoint(ApiEndpoint):
+	def __init__(self, handler: Optional[HttpHandler] = None) -> None:
+		super().__init__(
+			path="/health",
+			method="GET",
+			name="health_check",
+			summary="Service health check",
+			handler=handler,
+		)
+
+
+class CollectEndpoint(ApiEndpoint):
+	def __init__(self, handler: Optional[HttpHandler] = None) -> None:
+		super().__init__(
+			path="/collect",
+			method="POST",
+			name="manual_collect",
+			summary="Manually trigger event collection",
+			handler=handler,
+		)
+
+
+class WebhookEndpoint(ApiEndpoint):
+	def __init__(self, handler: Optional[HttpHandler] = None) -> None:
+		super().__init__(
+			path="/webhook",
+			method="POST",
+			name="github_webhook",
+			summary="Optional GitHub webhook receiver",
+			handler=handler,
+		)
+
+
+class MetricsEventCountsEndpoint(ApiEndpoint):
+	def __init__(self, handler: Optional[HttpHandler] = None) -> None:
+		super().__init__(
+			path="/metrics/event-counts",
+			method="GET",
+			name="get_event_counts",
+			summary="Get event counts by type",
+			handler=handler,
+		)
+
+
+class MetricsPrIntervalEndpoint(ApiEndpoint):
+	def __init__(self, handler: Optional[HttpHandler] = None) -> None:
+		super().__init__(
+			path="/metrics/pr-interval",
+			method="GET",
+			name="get_pr_interval",
+			summary="Get average PR interval for a repository",
+			handler=handler,
+		)
+
+
+class MetricsRepositoryActivityEndpoint(ApiEndpoint):
+	def __init__(self, handler: Optional[HttpHandler] = None) -> None:
+		super().__init__(
+			path="/metrics/repository-activity",
+			method="GET",
+			name="get_repository_activity",
+			summary="Get activity summary for a repository",
+			handler=handler,
+		)
+
+
+class MetricsTrendingEndpoint(ApiEndpoint):
+	def __init__(self, handler: Optional[HttpHandler] = None) -> None:
+		super().__init__(
+			path="/metrics/trending",
+			method="GET",
+			name="get_trending_repositories",
+			summary="Get trending repositories by event count",
+			handler=handler,
+		)
+
+
+class VisualizationTrendingChartEndpoint(ApiEndpoint):
+	def __init__(self, handler: Optional[HttpHandler] = None) -> None:
+		super().__init__(
+			path="/visualization/trending-chart",
+			method="GET",
+			name="get_trending_chart",
+			summary="Generate trending repositories chart",
+			handler=handler,
+		)
+
+
+class VisualizationPrTimelineEndpoint(ApiEndpoint):
+	def __init__(self, handler: Optional[HttpHandler] = None) -> None:
+		super().__init__(
+			path="/visualization/pr-timeline",
+			method="GET",
+			name="get_pr_timeline_chart",
+			summary="Generate PR timeline chart for a repository",
+			handler=handler,
+		)
+
+
+class McpCapabilitiesEndpoint(ApiEndpoint):
+	def __init__(self, handler: Optional[HttpHandler] = None) -> None:
+		super().__init__(
+			path="/mcp/capabilities",
+			method="GET",
+			name="get_mcp_capabilities",
+			summary="List MCP tools, resources, and prompts",
+			handler=handler,
+		)
+
+
+class McpToolsEndpoint(ApiEndpoint):
+	def __init__(self, handler: Optional[HttpHandler] = None) -> None:
+		super().__init__(
+			path="/mcp/tools",
+			method="GET",
+			name="list_mcp_tools",
+			summary="List MCP tools",
+			handler=handler,
+		)
+
+
+class McpResourcesEndpoint(ApiEndpoint):
+	def __init__(self, handler: Optional[HttpHandler] = None) -> None:
+		super().__init__(
+			path="/mcp/resources",
+			method="GET",
+			name="list_mcp_resources",
+			summary="List MCP resources",
+			handler=handler,
+		)
+
+
+class McpPromptsEndpoint(ApiEndpoint):
+	def __init__(self, handler: Optional[HttpHandler] = None) -> None:
+		super().__init__(
+			path="/mcp/prompts",
+			method="GET",
+			name="list_mcp_prompts",
+			summary="List MCP prompts",
+			handler=handler,
+		)
+
+
+# ------------------------- Inlined Services Layer ----------------------------
+
+logger = logging.getLogger(__name__)
+
+
+class EventsRepository:
+	"""Component: EventsRepository - SQLite queries (read-only for API)"""
+	
+	def __init__(self, db_path: str):
+		self.db_path = db_path
+		self.dao_factory = EventsDaoFactory(db_path)
+		self.aggregates = AggregatesDao(db_path)
+	
+	async def _connect(self) -> aiosqlite.Connection:
+		"""Get database connection"""
+		return await aiosqlite.connect(self.db_path)
+	
+	async def count_events_by_type(self, since_ts: datetime) -> Dict[str, int]:
+		"""Count events by type since the given timestamp"""
+		daos = self.dao_factory.get_all_daos()
+		counts = {}
+		
+		for event_type, dao in daos.items():
+			counts[event_type] = await dao.count_total(since_ts)
+		
+		return counts
+	
+	async def pr_timestamps(self, repo: str) -> List[datetime]:
+		"""Get timestamps of PR 'opened' events for a repository"""
+		pr_dao = self.dao_factory.get_pr_dao()
+		return await pr_dao.get_pr_timestamps(repo)
+	
+	async def activity_by_repo(self, repo: str, since_ts: datetime) -> Dict[str, Any]:
+		"""Get activity breakdown for a repository since the given timestamp"""
+		daos = self.dao_factory.get_all_daos()
+		activity = {}
+		total_events = 0
+		
+		for event_type, dao in daos.items():
+			count = await dao.count_by_repo(repo, since_ts)
+			activity[event_type] = {"count": count}
+			total_events += count
+		
+		return {
+			"activity": activity,
+			"total_events": total_events
+		}
+	
+	async def trending_since(self, since_ts: datetime, limit: int) -> List[Dict[str, Any]]:
+		"""Get trending repositories since the given timestamp"""
+		return await self.aggregates.get_trending_since(since_ts, limit)
+	
+	async def get_pr_interval_stats(self, repo: str) -> Optional[Dict[str, Any]]:
+		"""Get PR interval statistics for a repository"""
+		pr_dao = self.dao_factory.get_pr_dao()
+		return await pr_dao.get_pr_interval_stats(repo)
+	
+	async def get_star_count_by_repo(self, repo: str, since_ts: datetime) -> int:
+		"""Get star count for a repository"""
+		watch_dao = self.dao_factory.get_watch_dao()
+		return await watch_dao.get_star_count_by_repo(repo, since_ts)
+	
+	async def get_issue_activity_summary(self, repo: str, since_ts: datetime) -> Dict[str, Any]:
+		"""Get issue activity summary for a repository"""
+		issues_dao = self.dao_factory.get_issues_dao()
+		return await issues_dao.get_issue_activity_summary(repo, since_ts)
+
+
+class MetricsService:
+	"""Component: MetricsService - Aggregate counts, PR intervals, activity windows"""
+	
+	def __init__(self, repository: EventsRepository):
+		self.repository = repository
+	
+	def _now(self) -> datetime:
+		"""Get current UTC time"""
+		return datetime.now(timezone.utc)
+	
+	async def get_event_counts(self, offset_minutes: int) -> Dict[str, Any]:
+		"""Get event counts by type for the given time offset"""
+		if offset_minutes <= 0:
+			raise ValueError("offset_minutes must be positive")
+		
+		since_ts = self._now() - timedelta(minutes=offset_minutes)
+		counts = await self.repository.count_events_by_type(since_ts)
+		
+		total_events = sum(counts.values())
+		
+		return {
+			"offset_minutes": offset_minutes,
+			"total_events": total_events,
+			"counts": counts,
+			"timestamp": self._now().isoformat()
+		}
+	
+	async def get_pr_interval(self, repo: str) -> Optional[float]:
+		"""Calculate average time between pull requests for a repository"""
+		result = await self.repository.get_pr_interval_stats(repo)
+		return result
+	
+	async def get_repository_activity(self, repo: str, hours: int) -> Dict[str, Any]:
+		"""Get detailed activity summary for a specific repository"""
+		since_ts = self._now() - timedelta(hours=hours)
+		activity_data = await self.repository.activity_by_repo(repo, since_ts)
+		
+		return {
+			"repo_name": repo,
+			"hours": hours,
+			"total_events": activity_data["total_events"],
+			"activity": activity_data["activity"],
+			"timestamp": self._now().isoformat()
+		}
+	
+	async def get_trending(self, hours: int, limit: int) -> List[Dict[str, Any]]:
+		"""Get most active repositories by event count"""
+		since_ts = self._now() - timedelta(hours=hours)
+		repositories = await self.repository.trending_since(since_ts, limit)
+		
+		return repositories
+
+
+class VisualizationService:
+	"""Component: VisualizationService - Build images/figures (e.g., Plotly/PNG)"""
+	
+	def __init__(self, repository: EventsRepository):
+		self.repository = repository
+	
+	def _build_plot(self, data: Any) -> plt.Figure:
+		"""Build a matplotlib figure from data"""
+		fig, ax = plt.subplots()
+		return fig
+	
+	async def trending_chart(self, hours: int, limit: int, format: str = "png") -> bytes:
+		"""Generate trending repositories chart"""
+		from datetime import timedelta
+		since_ts = datetime.now(timezone.utc) - timedelta(hours=hours)
+		trending_data = await self.repository.trending_since(since_ts, limit)
+		
+		if not trending_data:
+			raise ValueError("No data found for the specified time period")
+		
+		repo_names = [repo['repo_name'].split('/')[-1][:20] for repo in trending_data]
+		event_counts = [repo['total_events'] for repo in trending_data]
+		
+		plt.style.use('default')
+		fig, ax = plt.subplots(figsize=(12, 8))
+		
+		bars = ax.barh(range(len(repo_names)), event_counts, color='steelblue', alpha=0.7)
+		
+		ax.set_yticks(range(len(repo_names)))
+		ax.set_yticklabels(repo_names)
+		ax.set_xlabel('Event Count')
+		ax.set_title(f'Top {len(repo_names)} Repositories (Last {hours} Hours)')
+		ax.grid(axis='x', alpha=0.3)
+		
+		for i, (bar, count) in enumerate(zip(bars, event_counts)):
+			width = bar.get_width()
+			ax.text(width + max(event_counts) * 0.01, bar.get_y() + bar.get_height()/2, 
+				   str(count), ha='left', va='center', fontsize=9)
+		
+		plt.tight_layout()
+		
+		img_buffer = io.BytesIO()
+		if format == "svg":
+			plt.savefig(img_buffer, format='svg', bbox_inches='tight', dpi=150)
+		else:
+			plt.savefig(img_buffer, format='png', bbox_inches='tight', dpi=150)
+		
+		plt.close()
+		img_buffer.seek(0)
+		return img_buffer.read()
+	
+	async def pr_timeline(self, repo: str, format: str = "png") -> bytes:
+		"""Generate PR timeline chart"""
+		timestamps = await self.repository.pr_timestamps(repo)
+		
+		if len(timestamps) < 1:
+			raise ValueError("No PR data found for the specified repository")
+		
+		plt.style.use('default')
+		fig, ax = plt.subplots(figsize=(12, 6))
+		
+		dates = [ts.date() for ts in timestamps]
+		counts = [1] * len(dates)
+		
+		ax.plot(dates, counts, marker='o', color='steelblue', linewidth=2)
+		ax.fill_between(dates, counts, color='steelblue', alpha=0.15)
+		ax.set_xlabel('Date')
+		ax.set_ylabel('PRs opened')
+		ax.set_title(f"PR openings for {repo}")
+		ax.grid(axis='y', alpha=0.3)
+		plt.xticks(rotation=45, ha='right')
+		plt.tight_layout()
+		
+		img_buffer = io.BytesIO()
+		if format == "svg":
+			plt.savefig(img_buffer, format='svg', bbox_inches='tight', dpi=150)
+		else:
+			plt.savefig(img_buffer, format='png', bbox_inches='tight', dpi=150)
+		
+		plt.close()
+		img_buffer.seek(0)
+		return img_buffer.read()
+
+
+class HealthReporter:
+	"""Component: HealthReporter - Health status reporting"""
+	
+	def __init__(self, repository: EventsRepository):
+		self.repository = repository
+	
+	async def status(self) -> Dict[str, Any]:
+		"""Get system health status"""
+		try:
+			event_count = await self.repository.aggregates.get_total_events()
+			
+			return {
+				"status": "healthy",
+				"database_connected": True,
+				"total_events": event_count,
+				"timestamp": datetime.now(timezone.utc).isoformat()
+			}
+		except Exception as e:
+			logger.error(f"Health check failed: {e}")
+			return {
+				"status": "unhealthy",
+				"database_connected": False,
+				"error": str(e),
+				"timestamp": datetime.now(timezone.utc).isoformat()
+			}
 
 
 # Configuration from environment variables

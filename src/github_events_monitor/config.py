@@ -24,7 +24,7 @@ class Config:
 	user_agent: str = "GitHub-Events-Monitor/1.0"
 	
 	# Target repositories to monitor
-	target_repositories: List[str] = None
+	target_repositories: List[str] = None  # Will be set to ["sparesparrow/mcp-prompts"] in from_env() if not specified
 	
 	# Polling settings
 	poll_interval_seconds: int = 300  # 5 minutes
@@ -54,6 +54,9 @@ class Config:
 		target_repositories = None
 		if target_repos_env:
 			target_repositories = [repo.strip() for repo in target_repos_env.split(",") if repo.strip()]
+		else:
+			# Default target repositories if none specified
+			target_repositories = ["sparesparrow/mcp-prompts"]
 		
 		return cls(
 			database_path=os.getenv("DATABASE_PATH", cls.database_path),

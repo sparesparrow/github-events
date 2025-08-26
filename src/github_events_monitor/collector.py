@@ -16,6 +16,8 @@ from contextlib import asynccontextmanager
 
 import httpx
 import aiosqlite
+from .dao import SchemaDao, EventsWriteDao, AggregatesDao
+from .database import DatabaseManager
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -65,7 +67,8 @@ class GitHubEventsCollector:
 		db_path: str = "github_events.db",
 		github_token: Optional[str] = None,
 		user_agent: str = "GitHub-Events-Monitor/1.0",
-		target_repositories: Optional[List[str]] = None
+		target_repositories: Optional[List[str]] = None,
+		db_manager: Optional[DatabaseManager] = None,
 	):
 		self.db_path = db_path
 		self.github_token = github_token
@@ -74,39 +77,15 @@ class GitHubEventsCollector:
 		self.target_repositories = target_repositories
 		self.last_etag: Optional[str] = None
 		self.last_modified: Optional[str] = None
+		# Optional DB manager
+		self._dbm: Optional[DatabaseManager] = db_manager
+		if self._dbm is None:
+			self._dbm = DatabaseManager(db_path=self.db_path)
 		
 	async def initialize_database(self):
 		"""Initialize SQLite database with events table"""
-		async with aiosqlite.connect(self.db_path) as db:
-			await db.execute("""
-				CREATE TABLE IF NOT EXISTS events (
-					id TEXT PRIMARY KEY,
-					event_type TEXT NOT NULL,
-					repo_name TEXT NOT NULL,
-					actor_login TEXT NOT NULL,
-					created_at TIMESTAMP NOT NULL,
-					payload TEXT NOT NULL,
-					collected_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-				)
-			""")
-			# Defensive migration from legacy schema (type->event_type, created_at_ts→created_at TEXT)
-			try:
-				await db.execute("ALTER TABLE events ADD COLUMN event_type TEXT")
-			except Exception:
-				pass
-			try:
-				# If legacy column 'type' exists but 'event_type' is NULL, backfill
-				await db.execute("UPDATE events SET event_type = COALESCE(event_type, type)")
-			except Exception:
-				pass
-			# Create indices for performance
-			await db.execute("CREATE INDEX IF NOT EXISTS idx_event_type ON events(event_type)")
-			await db.execute("CREATE INDEX IF NOT EXISTS idx_repo_name ON events(repo_name)")
-			await db.execute("CREATE INDEX IF NOT EXISTS idx_created_at ON events(created_at)")
-			await db.execute("CREATE INDEX IF NOT EXISTS idx_repo_type_created ON events(repo_name, event_type, created_at)")
-			
-			await db.commit()
-
+		await self._dbm.initialize()
+	
 	@asynccontextmanager
 	async def _get_db_connection(self):
 		"""Compatibility helper for tests: yield an aiosqlite connection.
@@ -284,29 +263,19 @@ class GitHubEventsCollector:
 			
 		stored_count = 0
 		
-		async with aiosqlite.connect(self.db_path) as db:
-			for event in events:
-				try:
-					await db.execute("""
-						INSERT OR IGNORE INTO events 
-						(id, event_type, repo_name, actor_login, created_at, payload)
-						VALUES (?, ?, ?, ?, ?, ?)
-					""", (
-						event.id,
-						event.event_type,
-						event.repo_name,
-						event.actor_login,
-						event.created_at,
-						json.dumps(event.payload)
-					))
-					
-					if db.total_changes > 0:
-						stored_count += 1
-						
-				except Exception as e:
-					logger.error(f"Failed to store event {event.id}: {e}")
-			
-			await db.commit()
+		write_dao = self._dbm.writes
+		payloads = [
+			{
+				"id": event.id,
+				"event_type": event.event_type,
+				"repo_name": event.repo_name,
+				"actor_login": event.actor_login,
+				"created_at": event.created_at,
+				"payload": event.payload,
+			}
+			for event in events
+		]
+		stored_count = await write_dao.insert_events(payloads)
 		
 		logger.info(f"Stored {stored_count} new events")
 		return stored_count
@@ -326,40 +295,14 @@ class GitHubEventsCollector:
 			
 		cutoff_time = datetime.now(timezone.utc) - timedelta(minutes=offset_minutes)
 		
-		async with aiosqlite.connect(self.db_path) as db:
-			# Primary: count by event created_at within offset window
-			cursor = await db.execute(
-				"""
-				SELECT event_type, COUNT(*) as count
-				FROM events 
-				WHERE created_at >= ? 
-				GROUP BY event_type
-				ORDER BY event_type
-				""",
-				(cutoff_time,),
-			)
-			rows = await cursor.fetchall()
-
-			counts = {event_type: 0 for event_type in self.MONITORED_EVENTS}
-			for row in rows:
-				counts[row[0]] = row[1]
-
-			# Fallback: if nothing in the window, report totals (by type) for all data
-			if sum(counts.values()) == 0:
-				cursor = await db.execute(
-					"""
-					SELECT event_type, COUNT(*) as count
-					FROM events 
-					GROUP BY event_type
-					ORDER BY event_type
-					"""
-				)
-				rows = await cursor.fetchall()
-				counts = {event_type: 0 for event_type in self.MONITORED_EVENTS}
-				for row in rows:
-					counts[row[0]] = row[1]
-
-			return counts
+		aggregates = self._dbm.aggregates
+		counts = await aggregates.get_counts_by_type_since(cutoff_time)
+		# Ensure all monitored keys are present
+		counts = {**{event_type: 0 for event_type in self.MONITORED_EVENTS}, **counts}
+		if sum(counts.values()) == 0:
+			counts_total = await aggregates.get_counts_by_type_total()
+			counts = {**{event_type: 0 for event_type in self.MONITORED_EVENTS}, **counts_total}
+		return counts
 	
 	async def get_avg_pr_interval(self, repo_name: str) -> Optional[Dict[str, Any]]:
 		"""
@@ -371,58 +314,8 @@ class GitHubEventsCollector:
 		Returns:
 			Dictionary with average interval statistics or None if insufficient data
 		"""
-		async with aiosqlite.connect(self.db_path) as db:
-			# Get PR opened events for the repository, ordered by creation time
-			cursor = await db.execute("""
-				SELECT created_at, payload
-				FROM events
-				WHERE repo_name = ? AND event_type = 'PullRequestEvent'
-				ORDER BY created_at ASC
-			""", (repo_name,))
-			
-			rows = await cursor.fetchall()
-			
-			if len(rows) < 2:
-				return None
-			
-			# Filter for "opened" PR events and calculate intervals
-			pr_times = []
-			for row in rows:
-				created_at_str, payload_str = row
-				created_at = datetime.fromisoformat(created_at_str.replace('Z', '+00:00'))
-				payload = json.loads(payload_str)
-				
-				# Only consider "opened" PR events for meaningful intervals
-				if payload.get('action') == 'opened':
-					pr_times.append(created_at)
-			
-			if len(pr_times) < 2:
-				return None
-			
-			# Calculate intervals between consecutive PR openings
-			intervals = []
-			for i in range(1, len(pr_times)):
-				interval = (pr_times[i] - pr_times[i-1]).total_seconds()
-				intervals.append(interval)
-			
-			if not intervals:
-				return None
-			
-			# Calculate statistics
-			avg_seconds = statistics.mean(intervals)
-			median_seconds = statistics.median(intervals)
-			
-			return {
-				'repo_name': repo_name,
-				'pr_count': len(pr_times),
-				'avg_interval_seconds': avg_seconds,
-				'avg_interval_hours': avg_seconds / 3600,
-				'avg_interval_days': avg_seconds / (3600 * 24),
-				'median_interval_seconds': median_seconds,
-				'median_interval_hours': median_seconds / 3600,
-				'min_interval_seconds': min(intervals),
-				'max_interval_seconds': max(intervals)
-			}
+		pr_dao = self._dbm.events.get_pr_dao()
+		return await pr_dao.get_pr_interval_stats(repo_name)
 	
 	async def get_repository_activity_summary(
 		self, 
@@ -441,52 +334,15 @@ class GitHubEventsCollector:
 		"""
 		cutoff_time = datetime.now(timezone.utc) - timedelta(hours=hours)
 		
-		async with aiosqlite.connect(self.db_path) as db:
-			async def query_activity(where_clause: str, params: tuple) -> Tuple[Dict[str, Any], int]:
-				cursor = await db.execute(
-					f"""
-					SELECT 
-						event_type,
-						COUNT(*) as count,
-						MIN(created_at) as first_event,
-						MAX(created_at) as last_event
-					FROM events
-					WHERE {where_clause}
-					GROUP BY event_type
-					ORDER BY count DESC
-					""",
-					params,
-				)
-				rows = await cursor.fetchall()
-				activity_local: Dict[str, Any] = {}
-				total_local = 0
-				for event_type, count, first_event, last_event in rows:
-					activity_local[event_type] = {
-						'count': count,
-						'first_event': first_event,
-						'last_event': last_event,
-					}
-					total_local += count
-				return activity_local, total_local
-
-			# Primary within time window
-			activity, total_events = await query_activity(
-				"repo_name = ? AND created_at >= ?", (repo_name, cutoff_time)
-			)
-
-			# Fallback to all-time if none found in window
-			if total_events == 0:
-				activity, total_events = await query_activity(
-					"repo_name = ?", (repo_name,)
-				)
-
-			return {
-				'repo_name': repo_name,
-				'hours': hours,
-				'total_events': total_events,
-				'activity': activity,
-				'timestamp': datetime.now(timezone.utc).isoformat()
-			}
+		aggregates = self._dbm.aggregates
+		activity, total_events = await aggregates.get_repository_activity_summary(repo_name, cutoff_time)
+		return {
+			'repo_name': repo_name,
+			'hours': hours,
+			'total_events': total_events,
+			'activity': activity,
+			'timestamp': datetime.now(timezone.utc).isoformat()
+		}
 	
 	async def get_trending_repositories(self, hours: int = 24, limit: int = 10) -> List[Dict[str, Any]]:
 		"""
@@ -501,39 +357,9 @@ class GitHubEventsCollector:
 		"""
 		cutoff_time = datetime.now(timezone.utc) - timedelta(hours=hours)
 		
-		async with aiosqlite.connect(self.db_path) as db:
-			cursor = await db.execute("""
-				SELECT 
-					repo_name,
-					COUNT(*) as total_events,
-					COUNT(CASE WHEN event_type = 'WatchEvent' THEN 1 END) as watch_events,
-					COUNT(CASE WHEN event_type = 'PullRequestEvent' THEN 1 END) as pr_events,
-					COUNT(CASE WHEN event_type = 'IssuesEvent' THEN 1 END) as issue_events,
-					MIN(created_at) as first_event,
-					MAX(created_at) as last_event
-				FROM events
-				WHERE created_at >= ?
-				GROUP BY repo_name
-				ORDER BY total_events DESC
-				LIMIT ?
-			""", (cutoff_time, limit))
-			
-			rows = await cursor.fetchall()
-			
-			trending = []
-			for row in rows:
-				trending.append({
-					'repo_name': row[0],
-					'total_events': row[1],
-					'watch_events': row[2],
-					'pr_events': row[3],
-					'issue_events': row[4],
-					'first_event': row[5],
-					'last_event': row[6]
-				})
-			
-			return trending
-
+		aggregates = self._dbm.aggregates
+		return await aggregates.get_trending_since(cutoff_time, limit)
+	
 	async def get_event_counts_timeseries(self, hours: int = 24, bucket_minutes: int = 60) -> List[Dict[str, Any]]:
 		"""
 		Return a simple time-series of total events per bucket.
@@ -549,23 +375,8 @@ class GitHubEventsCollector:
 		if bucket_minutes <= 0:
 			bucket_minutes = 60
 		cutoff_time = datetime.now(timezone.utc) - timedelta(hours=hours)
-		async with aiosqlite.connect(self.db_path) as db:
-			# SQLite time bucketing via strftime to nearest minute bucket
-			cursor = await db.execute(
-				"""
-				SELECT
-					strftime('%Y-%m-%dT%H:%M:00Z', created_at) as minute_bucket,
-					COUNT(*) as total
-				FROM events
-				WHERE created_at >= ?
-				GROUP BY minute_bucket
-				ORDER BY minute_bucket ASC
-				""",
-				(cutoff_time,)
-			)
-			rows = await cursor.fetchall()
-			series = [{"bucket_start": b, "total": t} for b, t in rows]
-			return series
+		aggregates = self._dbm.aggregates
+		return await aggregates.get_event_counts_timeseries(cutoff_time)
 	
 	async def get_pr_timeline(self, repo_name: str, days: int = 7) -> List[Dict[str, Any]]:
 		"""
@@ -575,60 +386,15 @@ class GitHubEventsCollector:
 		"""
 		if days <= 0:
 			days = 1
-		from datetime import timedelta
-		now_utc = datetime.now(timezone.utc)
-		cutoff_time = now_utc - timedelta(days=days)
-		
-		# Build zero-filled buckets for each day in the window
-		buckets: Dict[str, int] = {}
-		for i in range(days + 1):
-			day = (cutoff_time + timedelta(days=i)).date().isoformat()
-			buckets[day] = 0
-		
-		async with aiosqlite.connect(self.db_path) as db:
-			cursor = await db.execute(
-				"""
-				SELECT created_at, payload
-				FROM events
-				WHERE repo_name = ?
-				  AND event_type = 'PullRequestEvent'
-				  AND created_at >= ?
-				ORDER BY created_at ASC
-				""",
-				(repo_name, cutoff_time),
-			)
-			rows = await cursor.fetchall()
-			for created_at_str, payload_str in rows:
-				try:
-					created_at = datetime.fromisoformat(str(created_at_str).replace('Z', '+00:00'))
-					payload = json.loads(payload_str)
-					if payload.get('action') == 'opened':
-						day_key = created_at.date().isoformat()
-						if day_key in buckets:
-							buckets[day_key] += 1
-				except Exception:
-					# Skip malformed rows gracefully
-					continue
-		
-		# Convert to sorted series
-		series = [{"date": day, "count": buckets[day]} for day in sorted(buckets.keys())]
+		pr_dao = self._dbm.events.get_pr_dao()
+		series = await pr_dao.get_pr_timeline(repo_name, days)
 		return series
-	
+
 	async def collect_and_store(self, limit: Optional[int] = None) -> int:
-		"""
-		Complete workflow: fetch events from API and store them
-		
-		Args:
-			limit: Maximum number of events to fetch
-			
-		Returns:
-			Number of events stored
-		"""
+		"""Complete workflow: fetch events and persist them to the database."""
 		await self.initialize_database()
-		
-		# If target repositories are configured, fetch from each one
 		if self.target_repositories:
-			all_events = []
+			all_events: List[GitHubEvent] = []
 			for repo in self.target_repositories:
 				repo_events = await self.fetch_repository_events(repo, limit)
 				all_events.extend(repo_events)

@@ -476,6 +476,28 @@ echo "📊 Dashboard: http://localhost:8000/docs"
 echo "🔍 Health: http://localhost:8000/health"
 ```
 
+#### Automated Database Updates
+
+The project includes a **scheduled GitHub Actions workflow** that automatically updates the GitHub events database:
+
+**Workflow**: `.github/workflows/update-events-db.yml`
+- **Schedule**: Runs every hour (`cron: '0 * * * *'`)
+- **Manual Trigger**: Can be triggered manually via GitHub Actions UI
+- **Docker-based**: Uses the project's Dockerfile for consistent execution
+- **Artifact**: Uploads the updated database as a workflow artifact
+
+**Key Features**:
+- ✅ **Docker-based execution** - Uses the working Dockerfile for reliability
+- ✅ **Fixed pyproject.toml** - Resolved TOML parsing issues
+- ✅ **Volume mounting** - Persists database between container runs
+- ✅ **Environment variables** - Properly passes GitHub token and database path
+- ✅ **Error handling** - Robust execution with proper error reporting
+
+**Recent Fixes**:
+- Fixed duplicate `[project]` sections in `pyproject.toml`
+- Updated workflow to use Docker instead of direct Python installation
+- Improved database path handling for containerized execution
+
 ```mermaid 
 flowchart TD
 
@@ -685,13 +707,9 @@ M -.->|alt: reads file| DBF
 classDef person fill:#f6f9ff,stroke:#5b8def,stroke-width:1px,color:#1b3a70;
 classDef external fill:#fff7e6,stroke:#f0b429,stroke-width:1px,color:#5a3a00;
 classDef internal fill:#eefbf2,stroke:#2ecc71,stroke-width:1px,color:#114d2e;
-classDef actorTool fill:#f4ffef,stroke:#2ecc71,stroke-width:1px,color:#114d2e;
-classDef endpoint fill:#ffffff,stroke:#bbbbbb,stroke-width:1px,color:#333333;
-classDef repo fill:#fff0f6,stroke:#d6336c,stroke-width:1px,color:#7a1f3b;
-classDef db fill:#eef2ff,stroke:#4c6ef5,stroke-width:1px,color:#243972;
 
 ```
-```mermaid
+mermaid
 flowchart TB
   %% Title: System Context diagram for GitHub Events Monitor
 

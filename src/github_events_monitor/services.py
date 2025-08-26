@@ -21,7 +21,7 @@ import matplotlib
 matplotlib.use('Agg')  # Use non-interactive backend for server
 import matplotlib.pyplot as plt
 
-from .dao import EventsDaoFactory
+from .dao import EventsDaoFactory, AggregatesDao
 
 logger = logging.getLogger(__name__)
 
@@ -32,6 +32,7 @@ class EventsRepository:
     def __init__(self, db_path: str):
         self.db_path = db_path
         self.dao_factory = EventsDaoFactory(db_path)
+        self.aggregates = AggregatesDao(db_path)
     
     async def _connect(self) -> aiosqlite.Connection:
         """Get database connection"""
@@ -70,44 +71,7 @@ class EventsRepository:
     
     async def trending_since(self, since_ts: datetime, limit: int) -> List[Dict[str, Any]]:
         """Get trending repositories since the given timestamp"""
-        db = await self._connect()
-        try:
-            cursor = await db.execute(
-                """
-                SELECT 
-                    repo_name,
-                    COUNT(*) as total_events,
-                    SUM(CASE WHEN event_type = 'WatchEvent' THEN 1 ELSE 0 END) as watch_events,
-                    SUM(CASE WHEN event_type = 'PullRequestEvent' THEN 1 ELSE 0 END) as pr_events,
-                    SUM(CASE WHEN event_type = 'IssuesEvent' THEN 1 ELSE 0 END) as issue_events,
-                    MIN(created_at) as first_event,
-                    MAX(created_at) as last_event
-                FROM events
-                WHERE created_at >= ?
-                GROUP BY repo_name
-                ORDER BY total_events DESC
-                LIMIT ?
-                """,
-                (since_ts, limit),
-            )
-            rows = await cursor.fetchall()
-            
-            repositories = []
-            for row in rows:
-                repo_name, total_events, watch_events, pr_events, issue_events, first_event, last_event = row
-                repositories.append({
-                    "repo_name": repo_name,
-                    "total_events": total_events,
-                    "watch_events": watch_events,
-                    "pr_events": pr_events,
-                    "issue_events": issue_events,
-                    "first_event": first_event,
-                    "last_event": last_event
-                })
-            
-            return repositories
-        finally:
-            await db.close()
+        return await self.aggregates.get_trending_since(since_ts, limit)
     
     async def get_pr_interval_stats(self, repo: str) -> Optional[Dict[str, Any]]:
         """Get PR interval statistics for a repository"""
@@ -282,14 +246,7 @@ class HealthReporter:
     async def status(self) -> Dict[str, Any]:
         """Get system health status"""
         try:
-            # Test database connectivity
-            db = await self.repository._connect()
-            try:
-                cursor = await db.execute("SELECT COUNT(*) FROM events")
-                row = await cursor.fetchone()
-                event_count = row[0] if row else 0
-            finally:
-                await db.close()
+            event_count = await self.repository.aggregates.get_total_events()
             
             return {
                 "status": "healthy",

@@ -16,32 +16,30 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.11'
-
-      - name: Install dependencies
+      - name: Build Docker image
         run: |
-          python -m pip install --upgrade pip
-          pip install -r requirements.txt || true
-          pip install -e .
+          docker build -f docker/Dockerfile -t github-events-monitor .
 
-      - name: Initialize and update DB via source modules
+      - name: Initialize and update DB via Docker
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           DATABASE_PATH: github_events.db
         run: |
-          python - <<'PY'
+          docker run --rm \
+            -e GITHUB_TOKEN=${{ secrets.GITHUB_TOKEN }} \
+            -e DATABASE_PATH=/app/data/github_events.db \
+            -v $(pwd)/github_events.db:/app/data/github_events.db \
+            github-events-monitor \
+            python -c "
           import asyncio
           from src.github_events_monitor.collector import GitHubEventsCollector
           async def main():
-              collector = GitHubEventsCollector('github_events.db', '${{ secrets.GITHUB_TOKEN }}')
+              collector = GitHubEventsCollector('/app/data/github_events.db', '${{ secrets.GITHUB_TOKEN }}')
               await collector.initialize_database()
               n = await collector.collect_and_store(limit=200)
               print(f'Collected {n} events')
           asyncio.run(main())
-          PY
+          "
 
       - name: Upload DB artifact
         uses: actions/upload-artifact@v4

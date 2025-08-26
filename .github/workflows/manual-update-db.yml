@@ -29,26 +29,12 @@ jobs:
           pip install -r requirements.txt || true
           pip install -e .
 
-      - name: Update DB for provided repositories via source modules
+      - name: Update DB for provided repositories
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           DATABASE_PATH: github_events.db
-          TARGET_REPOSITORIES: ${{ inputs.repositories }}
         run: |
-          python - <<'PY'
-          import asyncio, os
-          from src.github_events_monitor.collector import GitHubEventsCollector
-          repos = os.getenv('TARGET_REPOSITORIES','').split(',') if os.getenv('TARGET_REPOSITORIES') else []
-          print('Target repos:', repos)
-          async def main():
-              collector = GitHubEventsCollector('github_events.db', '${{ secrets.GITHUB_TOKEN }}')
-              await collector.initialize_database()
-              if repos:
-                  collector.target_repositories = [r.strip() for r in repos if r.strip()]
-              n = await collector.collect_and_store(limit=300)
-              print(f'Collected {n} events (manual run)')
-          asyncio.run(main())
-          PY
+          python scripts/manual_db_update.py --repos "${{ inputs.repositories }}" --limit 300
 
       - name: Commit DB changes (optional)
         run: |
