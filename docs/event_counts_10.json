@@ -1,0 +1,13 @@
+{
+  "status": 200,
+  "data": {
+    "offset_minutes": 10,
+    "total_events": 6,
+    "counts": {
+      "WatchEvent": 5,
+      "PullRequestEvent": 1,
+      "IssuesEvent": 0
+    },
+    "timestamp": "2025-08-26T03:23:36Z"
+  }
+}

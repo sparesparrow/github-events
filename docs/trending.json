@@ -1,0 +1,79 @@
+{
+  "status": 200,
+  "data": {
+    "hours": 24,
+    "repositories": [
+      {
+        "repo_name": "240011814/cuttingToolsUi",
+        "total_events": 1,
+        "watch_events": 0,
+        "pr_events": 1,
+        "issue_events": 0
+      },
+      {
+        "repo_name": "OpenBB-finance/OpenBB",
+        "total_events": 1,
+        "watch_events": 1,
+        "pr_events": 0,
+        "issue_events": 0
+      },
+      {
+        "repo_name": "Rydwxz/bhs",
+        "total_events": 1,
+        "watch_events": 1,
+        "pr_events": 0,
+        "issue_events": 0
+      },
+      {
+        "repo_name": "aws-aemilia-iad/Github-PR-Commit-Integration-Test-DoNotTouch-GitHubAutoBuildPrPreviewCanaryTest-v1-prod-us-east-1",
+        "total_events": 1,
+        "watch_events": 0,
+        "pr_events": 1,
+        "issue_events": 0
+      },
+      {
+        "repo_name": "chenbin0702/cms-system",
+        "total_events": 1,
+        "watch_events": 0,
+        "pr_events": 1,
+        "issue_events": 0
+      },
+      {
+        "repo_name": "coze-dev/coze-studio",
+        "total_events": 1,
+        "watch_events": 1,
+        "pr_events": 0,
+        "issue_events": 0
+      },
+      {
+        "repo_name": "djh00t/klingon_tools",
+        "total_events": 1,
+        "watch_events": 0,
+        "pr_events": 1,
+        "issue_events": 0
+      },
+      {
+        "repo_name": "roboflow/roboflow-python",
+        "total_events": 1,
+        "watch_events": 1,
+        "pr_events": 0,
+        "issue_events": 0
+      },
+      {
+        "repo_name": "sindresorhus/awesome",
+        "total_events": 1,
+        "watch_events": 1,
+        "pr_events": 0,
+        "issue_events": 0
+      },
+      {
+        "repo_name": "terybrown/try-3",
+        "total_events": 1,
+        "watch_events": 0,
+        "pr_events": 1,
+        "issue_events": 0
+      }
+    ],
+    "timestamp": "2025-08-26T03:23:36Z"
+  }
+}
