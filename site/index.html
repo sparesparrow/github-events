@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset='utf-8'/>
+  <title>GitHub Events Monitor</title>
+  <script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
+  <style>body{font-family:system-ui,Segoe UI,Arial;margin:24px;} .wrap{max-width:1000px;margin:auto;} h1{margin-bottom:8px}</style>
+</head>
+<body>
+  <div class="wrap">
+    <h1>GitHub Events Monitor</h1>
+    <p>Live visualizations from REST API.</p>
+    <div style="margin:12px 0;">
+      <label>API Base URL: <input id="apiBase" style="width:420px" placeholder="http://127.0.0.1:8000"/></label>
+      <label style="margin-left:12px;">Minutes: <input id="minutes" type="number" value="60" min="1" style="width:80px"/></label>
+      <label style="margin-left:12px;">Top repos: <input id="limit" type="number" value="10" min="1" max="20" style="width:80px"/></label>
+      <button id="loadBtn">Load</button>
+    </div>
+    <div id="chartCounts" style="width:100%;height:420px;"></div>
+    <div id="chartTrending" style="width:100%;height:520px;margin-top:24px;"></div>
+  </div>
+  <script>
+    function getParam(name){
+      const url = new URL(window.location.href);
+      return url.searchParams.get(name);
+    }
+    const apiInput = document.getElementById('apiBase');
+    const minutesInput = document.getElementById('minutes');
+    const limitInput = document.getElementById('limit');
+    apiInput.value = getParam('api') || localStorage.getItem('apiBase') || 'http://127.0.0.1:8000';
+    function saveApi(){ localStorage.setItem('apiBase', apiInput.value); }
+    apiInput.addEventListener('change', saveApi);
+
+    async function fetchJson(url){
+      const res = await fetch(url);
+      if(!res.ok) throw new Error('HTTP '+res.status);
+      return await res.json();
+    }
+
+    async function loadCharts(){
+      const api = apiInput.value.replace(/\/$/, '');
+      const minutes = parseInt(minutesInput.value || '60', 10);
+      const limit = parseInt(limitInput.value || '10', 10);
+      try{
+        const countsUrl = `${api}/metrics/event-counts?offset_minutes=${minutes}`;
+        const trendingUrl = `${api}/metrics/trending?hours=${Math.ceil(minutes/60)||1}&limit=${limit}`;
+        const [countsResp, trendingResp] = await Promise.all([
+          fetchJson(countsUrl), fetchJson(trendingUrl)
+        ]);
+        const counts = countsResp.counts || {};
+        const types = Object.keys(counts);
+        const values = types.map(t => counts[t]);
+        const countsData = [{type:'bar', x: types, y: values, marker:{color:'#3b82f6'}}];
+        const countsLayout = {title:`Event Counts by Type (last ${minutes} min)`, xaxis:{title:'Event Type'}, yaxis:{title:'Count'}};
+        Plotly.newPlot('chartCounts', countsData, countsLayout, {displaylogo:false});
+
+        const repos = (trendingResp.repositories||[]).map(r => ({name: r.repo_name.split('/').pop(), total: r.total_events}));
+        const y = repos.map(r => r.name);
+        const x = repos.map(r => r.total);
+        const trendData = [{type:'bar', x, y, orientation:'h', marker:{color:'#10b981'}}];
+        const trendLayout = {title:`Trending Repositories (last ${Math.ceil(minutes/60)||1} hours)`, xaxis:{title:'Events'}, yaxis:{title:'Repository'}};
+        Plotly.newPlot('chartTrending', trendData, trendLayout, {displaylogo:false});
+      } catch(err){
+        console.error(err);
+        alert('Failed to load data. Check API base URL and CORS.');
+      }
+    }
+    document.getElementById('loadBtn').addEventListener('click', loadCharts);
+    loadCharts();
+  </script>
+</body>
+</html>
