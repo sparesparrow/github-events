@@ -1,1 +1,60 @@
-{"events_by_type_date":[],"top_repositories":[],"pr_metrics":[],"last_updated":""}
+{
+  "events_by_type_date": [
+    {
+      "type": "PullRequestEvent",
+      "day": "2025-08-26",
+      "count": 5
+    },
+    {
+      "type": "WatchEvent",
+      "day": "2025-08-26",
+      "count": 1
+    }
+  ],
+  "top_repositories": [
+    {
+      "repo_name": "240011814/cuttingToolsUi",
+      "total_events": 1,
+      "watches": 0,
+      "pull_requests": 1,
+      "issues": 0
+    },
+    {
+      "repo_name": "OpenBB-finance/OpenBB",
+      "total_events": 1,
+      "watches": 1,
+      "pull_requests": 0,
+      "issues": 0
+    },
+    {
+      "repo_name": "aws-aemilia-iad/Github-PR-Commit-Integration-Test-DoNotTouch-GitHubAutoBuildPrPreviewCanaryTest-v1-prod-us-east-1",
+      "total_events": 1,
+      "watches": 0,
+      "pull_requests": 1,
+      "issues": 0
+    },
+    {
+      "repo_name": "chenbin0702/cms-system",
+      "total_events": 1,
+      "watches": 0,
+      "pull_requests": 1,
+      "issues": 0
+    },
+    {
+      "repo_name": "djh00t/klingon_tools",
+      "total_events": 1,
+      "watches": 0,
+      "pull_requests": 1,
+      "issues": 0
+    },
+    {
+      "repo_name": "volcengine/verl",
+      "total_events": 1,
+      "watches": 0,
+      "pull_requests": 1,
+      "issues": 0
+    }
+  ],
+  "pr_metrics": [],
+  "last_updated": "2025-08-26T02:57:54Z"
+}
