@@ -20,15 +20,23 @@ jobs:
         run: |
           docker build -f Dockerfile -t github-events-monitor .
 
+      - name: Pre-create DB file with write permissions on host
+        run: |
+          mkdir -p $(pwd)
+          touch github_events.db
+          chmod 777 github_events.db
+          ls -la github_events.db
+
       - name: Initialize and update DB via Docker
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           DATABASE_PATH: github_events.db
         run: |
           docker run --rm \
+            --user root \
             -e GITHUB_TOKEN=${{ secrets.GITHUB_TOKEN }} \
             -e DATABASE_PATH=/app/data/github_events.db \
-            -v $(pwd)/github_events.db:/app/data/github_events.db \
+            -v $(pwd)/github_events.db:/app/data/github_events.db:rw \
             github-events-monitor \
             python -c "
           import asyncio
