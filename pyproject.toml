@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "github-events-monitor"
-version = 1.2.0
+version = "1.2.3"
 description = "GitHub Events Monitor with FastAPI REST API and MCP server for real-time event tracking and visualization"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -59,7 +59,7 @@ dev = [
 
 [project.scripts]
 github-events-monitor-api = "src.github_events_monitor.api:run"
-github-events-monitor-mcp = "src.github_events_monitor.mcp_server:run"
+github-events-monitor-mcp = "scripts.mcp_server:run"
 
 [tool.hatch.build]
 packages = ["src/github_events_monitor"]
@@ -78,8 +78,6 @@ markers = [
   "api: API tests",
   "mcp: MCP tests",
 ]
-
- 
 
 [tool.uv.sources]
 github-events-monitor = { workspace = true }

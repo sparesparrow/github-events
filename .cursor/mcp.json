@@ -7,6 +7,7 @@
           "-i",
           "--rm",
           "--init",
+          "--add-host", "host.docker.internal:host-gateway",
           "-e", "GITHUB_TOKEN=${{GITHUB_PERSONAL_ACCESS_TOKEN}}",
           "-e", "MCP_MODE=true",
           "-e", "DATABASE_PATH=/app/data/github_events.db",
@@ -14,7 +15,7 @@
           "-e", "API_BASE_URL=http://host.docker.internal:8000",
           "-v", "/home/sparrow/mcp/data/github-events:/app/data",
           "--name", "mcp-github-events-container",
-          "sparesparrow/github-events"
+          "sparesparrow/github-events:1.2.0"
         ],
         "description": "GitHub Events Monitor MCP Server via Docker container with persistent storage"
       },

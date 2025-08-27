@@ -21,7 +21,6 @@ from datetime import datetime, timezone
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
 from github_events_monitor.database import DatabaseManager
-from github_events_monitor.services import HealthReporter, EventsRepository
 
 
 async def main():
@@ -46,16 +45,16 @@ async def main():
     args = parser.parse_args()
     
     try:
-        # Initialize database manager
+        # Initialize database manager and check aggregates
         db_manager = DatabaseManager(args.db_path)
         await db_manager.initialize()
-        
-        # Create health reporter
-        repository = EventsRepository(args.db_path)
-        health_reporter = HealthReporter(repository)
-        
-        # Get health status
-        status = await health_reporter.status()
+        total = await db_manager.aggregates.get_total_events()
+        status = {
+            "status": "healthy",
+            "database_connected": True,
+            "total_events": total,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        }
         
         # Format output
         if args.output == "json":

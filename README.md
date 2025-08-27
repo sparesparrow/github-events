@@ -167,14 +167,11 @@ GITHUB_TOKEN=your_token DATABASE_PATH=./custom.db python -m src.github_events_mo
 
 #### Starting the MCP Server
 ```bash
-# Method 1: Using the module
-python -m src.github_events_monitor.mcp_server
+# Method 1: Run the MCP server script (recommended)
+python scripts/mcp_server.py
 
-# Method 2: Using the installed script
-github-events-monitor-mcp
-
-# Method 3: With custom database
-DATABASE_PATH=./custom.db python -m src.github_events_monitor.mcp_server
+# Method 2: Custom database path
+DATABASE_PATH=./custom.db python scripts/mcp_server.py
 ```
 
 #### MCP Client Configuration
@@ -186,7 +183,7 @@ DATABASE_PATH=./custom.db python -m src.github_events_monitor.mcp_server
     "github-events": {
       "command": "python",
       "args": [
-        "-m", "src.github_events_monitor.mcp_server"
+        "scripts/mcp_server.py"
       ],
       "cwd": "/path/to/github-events-clone",
       "env": {
@@ -225,6 +222,13 @@ DATABASE_PATH=./custom.db python -m src.github_events_monitor.mcp_server
 - `get_pr_timeline_chart(repo_name, days, format)`: PR timeline visualization
 - `collect_events_now(limit)`: Trigger manual event collection
 - `get_health()`: Service health status
+
+Additional DB-backed tools (direct SQLite access via MCP server):
+- `db_get_average_pr_time(repo_name)`
+- `db_get_events_by_offset(offset_minutes)`
+- `db_get_repository_activity(repo_name, limit)`
+- `db_get_top_repositories(limit)`
+- `db_get_event_statistics()`
 
 ### 🌊 curl Command Examples
 
@@ -536,7 +540,7 @@ The project includes a **scheduled GitHub Actions workflow** that automatically 
 - Updated workflow to use Docker instead of direct Python installation
 - Improved database path handling for containerized execution
 
-```mermaid 
+```mermaid
 flowchart TD
 
 %% People
@@ -747,7 +751,7 @@ classDef external fill:#fff7e6,stroke:#f0b429,stroke-width:1px,color:#5a3a00;
 classDef internal fill:#eefbf2,stroke:#2ecc71,stroke-width:1px,color:#114d2e;
 
 ```
-mermaid
+```mermaid
 flowchart TB
   %% Title: System Context diagram for GitHub Events Monitor
 
@@ -974,6 +978,246 @@ EventsDao --> DBConnection : SQL (SELECT)
 HealthReporter ..> DBConnection : optional ping
 
 ```
+
+```mermaid
+flowchart TB
+  %% Interfaces
+  subgraph Interfaces
+    FastAPI["FastAPI Controllers\n(metrics, viz, health)"]
+    MCP["MCP Tools\n(event_counts, pr_interval, trending_chart)"]
+  end
+
+  %% Read-side Services
+  subgraph Services_Read
+    MetricsService["MetricsService"]
+    VisualizationService["VisualizationService"]
+  end
+
+  %% Protocols (DIP)
+  subgraph Protocols
+    EventsReadRepositoryProtocol["EventsReadRepositoryProtocol\n(Protocol)"]
+    EventsWriteStoreProtocol["EventsWriteStoreProtocol\n(Protocol)"]
+  end
+
+  %% Repository + DAOs (Read)
+  subgraph DataAccess_Read
+    EventsRepository["EventsRepository"]
+    EventsDaoFactory["EventsDaoFactory"]
+    EventsDao["EventsDao (abstract)"]
+    WatchEventDao["WatchEventDao"]
+    PullRequestEventDao["PullRequestEventDao"]
+    IssuesEventDao["IssuesEventDao"]
+    DBConnection["DBConnection (aiosqlite)"]
+  end
+
+  %% Collector (Write)
+  subgraph Ingestion_Write
+    GitHubEventsCollector["GitHubEventsCollector"]
+    ApiRequestReader["ApiRequestReader"]
+    ApiResponseWriter["ApiResponseWriter"]
+  end
+
+  %% Storage / External
+  SQLiteDB["SQLite Database\n(github_events.db)"]
+  GitHubAPI["GitHub API /events"]
+
+  %% Edges
+  FastAPI --> MetricsService
+  MCP --> MetricsService
+  MetricsService --> EventsReadRepositoryProtocol
+  VisualizationService --> EventsReadRepositoryProtocol
+  EventsReadRepositoryProtocol -.-> EventsRepository
+  EventsRepository --> EventsDaoFactory
+  EventsDaoFactory --> EventsDao
+  EventsDao <|-- WatchEventDao
+  EventsDao <|-- PullRequestEventDao
+  EventsDao <|-- IssuesEventDao
+  WatchEventDao --> DBConnection
+  PullRequestEventDao --> DBConnection
+  IssuesEventDao --> DBConnection
+  DBConnection --> SQLiteDB
+
+  GitHubEventsCollector --> ApiRequestReader
+  GitHubEventsCollector --> EventsWriteStoreProtocol
+  EventsWriteStoreProtocol -.-> ApiResponseWriter
+  ApiRequestReader --> GitHubAPI
+  ApiResponseWriter --> SQLiteDB
+```
+
+```mermaid
+flowchart TB
+  %% Interfaces (HTTP + Tools)
+  subgraph Interfaces
+    MetricsEventCountsEndpoint["MetricsEventCountsEndpoint\nGET /metrics/event-counts"]
+    MetricsPrIntervalEndpoint["MetricsPrIntervalEndpoint\nGET /metrics/pr-interval"]
+    MetricsRepositoryActivityEndpoint["MetricsRepositoryActivityEndpoint\nGET /metrics/repository-activity"]
+    MetricsTrendingEndpoint["MetricsTrendingEndpoint\nGET /metrics/trending"]
+    VisualizationTrendingChartEndpoint["VisualizationTrendingChartEndpoint\nGET /visualization/trending-chart"]
+    VisualizationPrTimelineEndpoint["VisualizationPrTimelineEndpoint\nGET /visualization/pr-timeline"]
+    HealthEndpoint["HealthEndpoint\nGET /health"]
+    McpTools["MCP Tools\n(event_counts, pr_interval, trending_chart, pr_timeline)"]
+  end
+
+  %% Services (Read side)
+  subgraph Services_Read
+    MetricsService["MetricsService"]
+    VisualizationService["VisualizationService"]
+    HealthReporter["HealthReporter"]
+  end
+
+  %% Protocols for DIP
+  subgraph Protocols
+    EventsReadRepositoryProtocol["EventsReadRepositoryProtocol\n(Protocol)"]
+    EventsWriteStoreProtocol["EventsWriteStoreProtocol\n(Protocol)"]
+  end
+
+  %% Repository + DAOs (Read side)
+  subgraph DataAccess_Read
+    EventsRepository["EventsRepository"]
+    EventsDaoFactory["EventsDaoFactory"]
+    EventsDao["EventsDao (abstract)"]
+    WatchEventDao["WatchEventDao"]
+    PullRequestEventDao["PullRequestEventDao"]
+    IssuesEventDao["IssuesEventDao"]
+    DBConnection["DBConnection (aiosqlite)"]
+  end
+
+  %% Collector (Write side)
+  subgraph Ingestion_Write
+    GitHubEventsCollector["GitHubEventsCollector"]
+    ApiRequestReader["ApiRequestReader"]
+    ApiResponseWriter["ApiResponseWriter"]
+  end
+
+  %% Storage
+  SQLiteDB["SQLite Database\n(github_events.db)"]
+
+  %% External
+  GitHubAPI["GitHub API /events"]
+
+  %% Edges: Interfaces -> Services
+  MetricsEventCountsEndpoint --> MetricsService
+  MetricsPrIntervalEndpoint --> MetricsService
+  MetricsRepositoryActivityEndpoint --> MetricsService
+  MetricsTrendingEndpoint --> MetricsService
+  VisualizationTrendingChartEndpoint --> VisualizationService
+  VisualizationPrTimelineEndpoint --> VisualizationService
+  HealthEndpoint --> HealthReporter
+  McpTools --> MetricsService
+  McpTools --> VisualizationService
+
+  %% Edges: Services -> Protocols (read)
+  MetricsService --> EventsReadRepositoryProtocol
+  VisualizationService --> EventsReadRepositoryProtocol
+  HealthReporter --> DBConnection
+
+  %% Edges: Protocols -> Implementations (read)
+  EventsReadRepositoryProtocol -.-> EventsRepository
+  EventsRepository --> EventsDaoFactory
+  EventsDaoFactory --> EventsDao
+  EventsDao <|-- WatchEventDao
+  EventsDao <|-- PullRequestEventDao
+  EventsDao <|-- IssuesEventDao
+  WatchEventDao --> DBConnection
+  PullRequestEventDao --> DBConnection
+  IssuesEventDao --> DBConnection
+  DBConnection --> SQLiteDB
+
+  %% Edges: Ingestion (write)
+  GitHubEventsCollector --> ApiRequestReader
+  GitHubEventsCollector --> EventsWriteStoreProtocol
+  EventsWriteStoreProtocol -.-> ApiResponseWriter
+  ApiRequestReader --> GitHubAPI
+  ApiResponseWriter --> SQLiteDB
+```
+
+```mermaid
+flowchart TB
+  %% Interfaces (HTTP + Tools)
+  subgraph Interfaces
+    MetricsEventCountsEndpoint["MetricsEventCountsEndpoint\nGET /metrics/event-counts"]
+    MetricsPrIntervalEndpoint["MetricsPrIntervalEndpoint\nGET /metrics/pr-interval"]
+    MetricsRepositoryActivityEndpoint["MetricsRepositoryActivityEndpoint\nGET /metrics/repository-activity"]
+    MetricsTrendingEndpoint["MetricsTrendingEndpoint\nGET /metrics/trending"]
+    VisualizationTrendingChartEndpoint["VisualizationTrendingChartEndpoint\nGET /visualization/trending-chart"]
+    VisualizationPrTimelineEndpoint["VisualizationPrTimelineEndpoint\nGET /visualization/pr-timeline"]
+    HealthEndpoint["HealthEndpoint\nGET /health"]
+    McpTools["MCP Tools\n(event_counts, pr_interval, trending_chart, pr_timeline)"]
+  end
+
+  %% Services (Read side)
+  subgraph Services_Read
+    MetricsService["MetricsService"]
+    VisualizationService["VisualizationService"]
+    HealthReporter["HealthReporter"]
+  end
+
+  %% Protocols for DIP
+  subgraph Protocols
+    EventsReadRepositoryProtocol["EventsReadRepositoryProtocol\n(Protocol)"]
+    EventsWriteStoreProtocol["EventsWriteStoreProtocol\n(Protocol)"]
+  end
+
+  %% Repository + DAOs (Read side)
+  subgraph DataAccess_Read
+    EventsRepository["EventsRepository"]
+    EventsDaoFactory["EventsDaoFactory"]
+    EventsDao["EventsDao (abstract)"]
+    WatchEventDao["WatchEventDao"]
+    PullRequestEventDao["PullRequestEventDao"]
+    IssuesEventDao["IssuesEventDao"]
+    DBConnection["DBConnection (aiosqlite)"]
+  end
+
+  %% Collector (Write side)
+  subgraph Ingestion_Write
+    GitHubEventsCollector["GitHubEventsCollector"]
+    ApiRequestReader["ApiRequestReader"]
+    ApiResponseWriter["ApiResponseWriter"]
+  end
+
+  %% Storage
+  SQLiteDB["SQLite Database\n(github_events.db)"]
+
+  %% External
+  GitHubAPI["GitHub API /events"]
+
+  %% Edges: Interfaces -> Services
+  MetricsEventCountsEndpoint --> MetricsService
+  MetricsPrIntervalEndpoint --> MetricsService
+  MetricsRepositoryActivityEndpoint --> MetricsService
+  MetricsTrendingEndpoint --> MetricsService
+  VisualizationTrendingChartEndpoint --> VisualizationService
+  VisualizationPrTimelineEndpoint --> VisualizationService
+  HealthEndpoint --> HealthReporter
+  McpTools --> MetricsService
+  McpTools --> VisualizationService
+
+  %% Edges: Services -> Protocols (read)
+  MetricsService --> EventsReadRepositoryProtocol
+  VisualizationService --> EventsReadRepositoryProtocol
+  HealthReporter --> DBConnection
+
+  %% Edges: Protocols -> Implementations (read)
+  EventsReadRepositoryProtocol -.-> EventsRepository
+  EventsRepository --> EventsDaoFactory
+  EventsDaoFactory --> EventsDao
+  EventsDao <|-- WatchEventDao
+  EventsDao <|-- PullRequestEventDao
+  EventsDao <|-- IssuesEventDao
+  WatchEventDao --> DBConnection
+  PullRequestEventDao --> DBConnection
+  IssuesEventDao --> DBConnection
+  DBConnection --> SQLiteDB
+
+  %% Edges: Ingestion (write)
+  GitHubEventsCollector --> ApiRequestReader
+  GitHubEventsCollector --> EventsWriteStoreProtocol
+  EventsWriteStoreProtocol -.-> ApiResponseWriter
+  ApiRequestReader --> GitHubAPI
+  ApiResponseWriter --> SQLiteDB
+```
+
 ### 🌐 API Endpoints
 - **Health**: `GET /health`
 - **Event Counts**: `GET /metrics/event-counts?offset_minutes=60`
@@ -1007,7 +1251,7 @@ Optional: export GITHUB_TOKEN for higher limits.
 - python scripts/data_exporter.py
 
 5) MCP Server
-- python scripts/mcp_server_cli.py
+- python scripts/mcp_server.py
 
 ## Docker Deployment
 

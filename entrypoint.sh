@@ -33,7 +33,7 @@ echo ""
 # Check if we should run MCP server or REST API
 if [ "$MCP_MODE" = "true" ]; then
     echo "🤖 Starting MCP Server..."
-    exec python -m github_events_monitor.mcp_server
+    exec python scripts/mcp_server.py
 else
     echo "🌐 Starting REST API Server..."
     exec python -m github_events_monitor.api

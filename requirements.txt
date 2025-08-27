@@ -1,44 +1,9 @@
-# GitHub Events Monitor Requirements
-# Install with: pip install -r requirements.txt
-
-# === CORE RUNTIME DEPENDENCIES ===
-# HTTP client and database
-httpx>=0.27.0
-aiosqlite>=0.19.0
-asyncio-pool>=0.6.0
-
-# FastAPI web framework
-fastapi>=0.110.0
-uvicorn[standard]>=0.29.0
-pydantic>=2.6.0
-
-# Model Context Protocol
+fastapi==0.115.0
+uvicorn[standard]==0.30.5
+httpx==0.27.2
+aiosqlite==0.20.0
+pydantic==2.8.2
+python-dateutil==2.9.0.post0
+matplotlib==3.9.2
+Pillow==10.4.0
 mcp>=1.0.0
-
-# Visualization and image processing
-matplotlib>=3.8.0
-Pillow>=10.2.0
-
-# Optional performance optimization (Unix-like systems only)
-uvloop>=0.19.0; sys_platform != "win32"
-
-# === DEVELOPMENT AND TESTING ===
-# Testing framework
-pytest>=8.0.0
-pytest-asyncio>=0.23.0
-pytest-mock>=3.12.0
-
-# Code formatting
-black>=24.0.0
-isort>=5.13.0
-
-# === OPTIONAL ENHANCEMENTS ===
-# Data processing and advanced visualization
-pandas>=2.2.2
-plotly>=5.23.0
-
-# HTTP client for CI scripts and examples
-requests>=2.32.0
-
-# Enhanced MCP features
-fastmcp>=0.3.0

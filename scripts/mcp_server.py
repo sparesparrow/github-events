@@ -11,6 +11,7 @@ import os
 from datetime import datetime, timezone
 from typing import Dict, Optional, Any, List
 
+import sqlite3
 import httpx
 from mcp.server.fastmcp import FastMCP
 from collections import deque
@@ -32,6 +33,10 @@ mcp = FastMCP(
 	name="GitHub Events Monitor",
 	dependencies=["httpx", "aiosqlite", "matplotlib"]
 )
+
+def now_iso() -> str:
+	"""Return current UTC time in ISO 8601 format (seconds precision)."""
+	return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 async def initialize_collector():
 	"""Initialize HTTP client and verify API health (client mode)."""
@@ -144,7 +149,8 @@ async def get_event_counts(offset_minutes: int) -> Dict[str, Any]:
 	try:
 		if offset_minutes <= 0:
 			return {"error": "offset_minutes must be positive"}
-		resp = await http_client.get("/metrics/event-counts", params={"offset_minutes": offset_minutes})
+		# API now prefers camelCase; keep compatibility if server accepts both
+		resp = await http_client.get("/metrics/event-counts", params={"offsetMinutes": offset_minutes})
 		resp.raise_for_status()
 		data = resp.json()
 		# ensure schema
@@ -158,6 +164,181 @@ async def get_event_counts(offset_minutes: int) -> Dict[str, Any]:
 	except Exception as e:
 		return {"error": str(e), "success": False}
 
+# DB-backed tools merged from scripts/mcp_server_cli.py
+
+@mcp.tool()
+def db_get_average_pr_time(repo_name: str) -> Dict[str, Any]:
+	"""
+	Compute average time between PR 'opened' events from local SQLite DB.
+	Returns minutes/hours and count.
+	"""
+	repo_name = (repo_name or "").strip()
+	if not repo_name:
+		return {"repository": repo_name, "error": "Repository name is required", "last_updated": now_iso()}
+	with sqlite3.connect(DATABASE_PATH) as conn:
+		cur = conn.cursor()
+		cur.execute(
+			"""
+			SELECT created_at_ts, payload
+			FROM events
+			WHERE repo_name = ? AND event_type = 'PullRequestEvent'
+			ORDER BY created_at_ts ASC
+			""",
+			(repo_name,),
+		)
+		rows = cur.fetchall()
+	stamps: List[int] = []
+	for ts, payload in rows:
+		try:
+			data = json.loads(payload) if payload else {}
+		except Exception:
+			data = {}
+		if (data or {}).get("action") == "opened":
+			try:
+				stamps.append(int(ts))
+			except Exception:
+				continue
+	if len(stamps) < 2:
+		return {"repository": repo_name, "error": "Not enough PR 'opened' events", "last_updated": now_iso()}
+	diffs = [stamps[i] - stamps[i-1] for i in range(1, len(stamps))]
+	avg_m = (sum(diffs) / len(diffs)) / 60.0
+	return {
+		"repository": repo_name,
+		"average_time_between_prs_minutes": round(avg_m, 2),
+		"average_time_between_prs_hours": round(avg_m / 60.0, 2),
+		"total_pull_requests": len(stamps),
+		"last_updated": now_iso(),
+	}
+
+@mcp.tool()
+def db_get_events_by_offset(offset_minutes: int) -> Dict[str, Any]:
+	"""
+	Return counts of events grouped by type for events created within the last N minutes.
+	Backed by local SQLite database.
+	"""
+	try:
+		offset = int(offset_minutes)
+	except Exception:
+		offset = 0
+	if offset < 0:
+		offset = 0
+	cutoff_ts = int(datetime.now(timezone.utc).timestamp()) - (offset * 60)
+	with sqlite3.connect(DATABASE_PATH) as conn:
+		cur = conn.cursor()
+		cur.execute(
+			"""
+			SELECT event_type, COUNT(*) FROM events
+			WHERE created_at_ts >= ?
+			GROUP BY event_type
+			""",
+			(cutoff_ts,),
+		)
+		rows = cur.fetchall()
+	data = {k: int(v) for k, v in rows}
+	return {
+		"offset_minutes": offset,
+		"event_counts": data,
+		"total_events": int(sum(data.values())),
+		"time_range_end": now_iso(),
+	}
+
+@mcp.tool()
+def db_get_repository_activity(repo_name: str, limit: int = 50) -> Dict[str, Any]:
+	"""
+	Return recent events for a repository (direct DB access).
+	"""
+	try:
+		limit_int = max(1, min(int(limit or 50), 200))
+	except Exception:
+		limit_int = 50
+	repo_name = (repo_name or "").strip()
+	if not repo_name:
+		return {"repository": repo_name, "error": "Repository name is required"}
+	with sqlite3.connect(DATABASE_PATH) as conn:
+		cur = conn.cursor()
+		cur.execute(
+			"""
+			SELECT id, event_type, actor_login, created_at, payload
+			FROM events
+			WHERE repo_name = ?
+			ORDER BY created_at_ts DESC
+			LIMIT ?
+			""",
+			(repo_name, limit_int),
+		)
+		rows = cur.fetchall()
+	events: List[Dict[str, Any]] = []
+	for eid, etype, actor, cat, payload in rows:
+		events.append({
+			"id": eid,
+			"type": etype,
+			"actor": actor,
+			"created_at": cat,
+			"payload": json.loads(payload) if payload else {},
+		})
+	return {"repository": repo_name, "count": len(events), "events": events}
+
+@mcp.tool()
+def db_get_top_repositories(limit: int = 10) -> Dict[str, Any]:
+	"""
+	Return repositories with most tracked activity and breakdown by type (direct DB access).
+	"""
+	try:
+		limit_int = max(1, min(int(limit or 10), 50))
+	except Exception:
+		limit_int = 10
+	with sqlite3.connect(DATABASE_PATH) as conn:
+		cur = conn.cursor()
+		cur.execute(
+			"""
+			SELECT repo_name,
+			       COUNT(*) AS total_events,
+			       SUM(CASE WHEN event_type='WatchEvent' THEN 1 ELSE 0 END) AS watches,
+			       SUM(CASE WHEN event_type='PullRequestEvent' THEN 1 ELSE 0 END) AS pull_requests,
+			       SUM(CASE WHEN event_type='IssuesEvent' THEN 1 ELSE 0 END) AS issues
+			FROM events
+			WHERE repo_name IS NOT NULL
+			GROUP BY repo_name
+			ORDER BY total_events DESC
+			LIMIT ?
+			""",
+			(limit_int,),
+		)
+		rows = cur.fetchall()
+	repos: List[Dict[str, Any]] = []
+	for name, total, w, pr, is_ in rows:
+		repos.append({
+			"name": name,
+			"total_events": int(total or 0),
+			"watches": int(w or 0),
+			"pull_requests": int(pr or 0),
+			"issues": int(is_ or 0),
+		})
+	return {"count": len(repos), "top_repositories": repos}
+
+@mcp.tool()
+def db_get_event_statistics() -> Dict[str, Any]:
+	"""
+	Return overall statistics about the stored events (direct DB access).
+	"""
+	with sqlite3.connect(DATABASE_PATH) as conn:
+		cur = conn.cursor()
+		cur.execute("SELECT event_type, COUNT(*) FROM events GROUP BY event_type ORDER BY COUNT(*) DESC")
+		event_types = {k: int(v) for k, v in cur.fetchall()}
+		cur.execute("SELECT MIN(created_at), MAX(created_at), COUNT(*) FROM events")
+		earliest, latest, total = cur.fetchone() or (None, None, 0)
+		cur.execute("SELECT COUNT(DISTINCT repo_name) FROM events")
+		unique_repos = int((cur.fetchone() or [0])[0] or 0)
+		cur.execute("SELECT COUNT(DISTINCT actor_login) FROM events")
+		unique_actors = int((cur.fetchone() or [0])[0] or 0)
+	return {
+		"total_events": int(total or 0),
+		"event_types": event_types,
+		"date_range": {"earliest": earliest, "latest": latest},
+		"unique_repositories": unique_repos,
+		"unique_actors": unique_actors,
+		"last_updated": now_iso(),
+	}
 @mcp.tool()
 async def get_avg_pr_interval(repo_name: str) -> Dict[str, Any]:
 	"""
@@ -172,7 +353,8 @@ async def get_avg_pr_interval(repo_name: str) -> Dict[str, Any]:
 	if not http_client:
 		return {"error": "HTTP client not initialized"}
 	try:
-		resp = await http_client.get("/metrics/pr-interval", params={"repo": repo_name})
+		# New API path for average PR interval
+		resp = await http_client.get("/metrics/avg-pr-interval", params={"repo": repo_name})
 		resp.raise_for_status()
 		result = resp.json() or {}
 		# Normalize and enrich
@@ -208,6 +390,14 @@ async def get_repository_activity(repo_name: str, hours: int = 24) -> Dict[str, 
 		)
 		resp.raise_for_status()
 		result = resp.json() or {}
+		# Normalize to legacy shape if API returns a simple counts dict
+		if isinstance(result, dict) and "activity" not in result:
+			counts = result
+			total_events = sum(int(v or 0) for v in counts.values())
+			result = {
+				"total_events": total_events,
+				"activity": {k: {"count": int(v)} for k, v in counts.items()},
+			}
 		result["success"] = True
 		total_events = result.get("total_events", 0) or 0
 		result["insights"] = {
@@ -237,7 +427,7 @@ async def get_trending_repositories(hours: int = 24, limit: int = 10) -> Dict[st
 		resp = await http_client.get("/metrics/trending", params={"hours": hours, "limit": limit})
 		resp.raise_for_status()
 		data = resp.json() or {}
-		repos = data.get("repositories", [])
+		repos = data.get("items", data.get("repositories", []))
 		return {
 			"hours": data.get("hours", hours),
 			"limit": limit,
