@@ -10,13 +10,15 @@ import json
 import logging
 import statistics
 from datetime import datetime, timedelta, timezone
-from typing import Dict, List, Optional, Any, Tuple, AsyncIterator, AsyncGenerator
+from typing import Dict, List, Optional, Any, Tuple, AsyncIterator, AsyncGenerator, Set, Deque
 from contextlib import asynccontextmanager
 
 import httpx
 import aiosqlite
 from .database import SchemaDao, EventsWriteDao, AggregatesDao, DatabaseManager
 from .event import GitHubEvent
+from collections import defaultdict, deque
+from typing import DefaultDict
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -53,6 +55,11 @@ class GitHubEventsCollector:
 		self._dbm: Optional[DatabaseManager] = db_manager
 		if self._dbm is None:
 			self._dbm = DatabaseManager(db_path=self.db_path)
+		# Events provider composed here
+		self._provider = GitHubEventsProvider(self._dbm)
+		# Runtime monitors registry (lightweight, in-memory)
+		self._monitors: Dict[int, GithubEventsMonitor] = {}
+		self._next_monitor_id: int = 1
 		
 	async def initialize_database(self):
 		"""Initialize SQLite database with events table"""
@@ -67,6 +74,8 @@ class GitHubEventsCollector:
 		db = await aiosqlite.connect(self.db_path)
 		try:
 			yield db
+		except Exception:
+			raise
 		finally:
 			await db.close()
 	
@@ -332,13 +341,20 @@ class GitHubEventsCollector:
 		aggregates = self._dbm.aggregates
 		return await aggregates.get_trending_since(cutoff_time, limit)
 	
-	async def get_event_counts_timeseries(self, hours: int = 24, bucket_minutes: int = 60) -> List[Dict[str, Any]]:
+	async def get_event_counts_timeseries(
+		self,
+		hours: int = 24,
+		bucket_minutes: int = 60,
+		repo_name: Optional[str] = None,
+	) -> List[Dict[str, Any]]:
 		"""
 		Return a simple time-series of total events per bucket.
 
 		Args:
 			hours: Window to look back
 			bucket_minutes: Size of each time bucket in minutes
+			repo_name: Optional repository filter ("owner/repo"). If provided, counts
+				are limited to that repository; otherwise counts are global.
 
 		Returns:
 			List of dicts: [{"bucket_start": iso, "total": n}] ordered by time.
@@ -348,7 +364,7 @@ class GitHubEventsCollector:
 			bucket_minutes = 60
 		cutoff_time = datetime.now(timezone.utc) - timedelta(hours=hours)
 		aggregates = self._dbm.aggregates
-		return await aggregates.get_event_counts_timeseries(cutoff_time)
+		return await aggregates.get_event_counts_timeseries(cutoff_time, bucket_minutes, repo_name)
 	
 	async def get_pr_timeline(self, repo_name: str, days: int = 7) -> List[Dict[str, Any]]:
 		"""
@@ -362,20 +378,240 @@ class GitHubEventsCollector:
 		series = await pr_dao.get_pr_timeline(repo_name, days)
 		return series
 
-	async def collect_and_store(self, limit: Optional[int] = None) -> int:
-		"""Complete workflow: fetch events and persist them to the database."""
-		await self.initialize_database()
-		if self.target_repositories:
-			all_events: List[GitHubEvent] = []
-			for repo in self.target_repositories:
-				repo_events = await self.fetch_repository_events(repo, limit)
-				all_events.extend(repo_events)
-				logger.info(f"Collected {len(repo_events)} events from {repo}")
-			return await self.store_events(all_events)
-		else:
-			# Fall back to general public events
-			events = await self.fetch_events(limit)
-			return await self.store_events(events)
+	# -------------------------
+	# EventDict functionality
+	# -------------------------
+
+	class EventDict:
+		"""Dictionary keyed by event type containing lists of GitHubEvent."""
+
+		def __init__(self) -> None:
+			self._by_type: DefaultDict[str, List[GitHubEvent]] = defaultdict(list)
+
+		def add(self, event: GitHubEvent) -> None:
+			self._by_type[event.event_type].append(event)
+
+		def extend(self, events: List[GitHubEvent]) -> None:
+			for e in events:
+				self.add(e)
+
+		def get(self, event_type: str) -> List[GitHubEvent]:
+			return list(self._by_type.get(event_type, []))
+
+		def types(self) -> List[str]:
+			return list(self._by_type.keys())
+
+		def to_dict(self) -> Dict[str, List[Dict[str, Any]]]:
+			return {k: [e.to_dict() for e in v] for k, v in self._by_type.items()}
+
+	async def get_event_dict_since(self, since: datetime) -> "GitHubEventsCollector.EventDict":
+		"""Delegate to provider to fetch grouped events since timestamp."""
+		return await self._provider.get_event_dict_since(since)
+
+	async def get_event_dict_recent(self, offset_minutes: int = 60) -> "GitHubEventsCollector.EventDict":
+		"""Fetch recent events grouped by type."""
+		if offset_minutes <= 0:
+			offset_minutes = 1
+		since = datetime.now(timezone.utc) - timedelta(minutes=offset_minutes)
+		return await self._provider.get_event_dict_since(since)
+
+
+class GitHubEventsProvider:
+	"""Provides EventDict structures backed by DAOs owned via DatabaseManager."""
+
+	def __init__(self, db_manager: DatabaseManager) -> None:
+		self._dbm = db_manager
+
+	class EventDict(GitHubEventsCollector.EventDict):
+		pass
+
+	async def get_event_dict_since(self, since: datetime) -> GitHubEventsCollector.EventDict:
+		result = GitHubEventsCollector.EventDict()
+		factory = self._dbm.events
+		for et in ("WatchEvent", "PullRequestEvent", "IssuesEvent"):
+			dao = factory.get_dao(et)
+			rows = await dao.get(repo=None, since_ts=since)
+			events: List[GitHubEvent] = []
+			for r in rows:
+				try:
+					created_at = r.get("created_at")
+					if isinstance(created_at, str):
+						created_at = datetime.fromisoformat(created_at.replace("Z", "+00:00"))
+					events.append(
+						GitHubEvent(
+							id=str(r.get("id")),
+							event_type=et,
+							created_at=created_at if isinstance(created_at, datetime) else datetime.now(timezone.utc),
+							repo_name=str(r.get("repo_name")),
+							actor_login=str(r.get("actor_login")),
+							payload=r.get("payload", {}) or {},
+						)
+					)
+				except Exception:
+					continue
+			result.extend(events)
+		return result
+
+
+class GithubEventsMonitor:
+	"""Instance-based in-memory monitor for a specific repository."""
+
+	def __init__(self, repository: str, monitored_events: Set[str], github_token: Optional[str] = None, interval_seconds: int = 60) -> None:
+		self.repository = repository
+		self.monitored_events = set(monitored_events)
+		self._token = github_token
+		self._interval = int(interval_seconds)
+		self._events: Deque[Dict[str, Any]] = deque()
+		self._task: Optional[asyncio.Task] = None
+		self.started_at: Optional[str] = None
+
+	async def _poll_loop(self) -> None:
+		repo = self.repository
+		interval = self._interval
+		allowed: Set[str] = self.monitored_events
+		etag: Optional[str] = None
+		url = f"https://api.github.com/repos/{repo}/events"
+		headers = {
+			"Accept": "application/vnd.github+json",
+			"X-GitHub-Api-Version": "2022-11-28",
+			"User-Agent": "github-events-monitor/1.0",
+		}
+		if self._token:
+			headers["Authorization"] = f"Bearer {self._token}"
+		async with httpx.AsyncClient(timeout=30.0) as client:
+			while self._task is not None:
+				try:
+					_h = dict(headers)
+					if etag:
+						_h["If-None-Match"] = etag
+					resp = await client.get(url, headers=_h)
+					if resp.status_code == 304:
+						await asyncio.sleep(max(5, interval))
+						continue
+					resp.raise_for_status()
+					etag = resp.headers.get("ETag", etag)
+					data = resp.json() or []
+					for e in data:
+						if e.get("type") not in allowed:
+							continue
+						self._events.appendleft({
+							"id": e.get("id"),
+							"type": e.get("type"),
+							"repo": (e.get("repo") or {}).get("name"),
+							"actor": (e.get("actor") or {}).get("login"),
+							"created_at": e.get("created_at"),
+						})
+						if len(self._events) > 1000:
+							self._events.pop()
+				except Exception:
+					await asyncio.sleep(max(10, interval))
+				else:
+					await asyncio.sleep(max(5, interval))
+
+	def start(self) -> None:
+		if self._task is not None:
+			return
+		self.started_at = datetime.now(timezone.utc).isoformat()
+		self._task = asyncio.create_task(self._poll_loop())
+
+	def stop(self) -> None:
+		task = self._task
+		self._task = None
+		if task and not task.done():
+			task.cancel()
+
+	@property
+	def buffer_size(self) -> int:
+		return len(self._events)
+
+	def get_events(self, limit: int = 100) -> List[Dict[str, Any]]:
+		limit = max(1, min(int(limit or 100), 1000))
+		return list(self._events)[:limit]
+
+	def get(self) -> "GitHubEventsCollector.EventDict":
+		"""Return buffered events grouped by type as EventDict of GitHubEvent."""
+		result = GitHubEventsCollector.EventDict()
+		for e in list(self._events):
+			try:
+				created_at = e.get("created_at")
+				if isinstance(created_at, str):
+					created_at = datetime.fromisoformat(created_at.replace("Z", "+00:00"))
+				gh = GitHubEvent(
+					id=str(e.get("id")),
+					event_type=str(e.get("type")),
+					created_at=created_at if isinstance(created_at, datetime) else datetime.now(timezone.utc),
+					repo_name=str(e.get("repo")),
+					actor_login=str(e.get("actor")),
+					payload={},
+				)
+				result.add(gh)
+			except Exception:
+				continue
+		return result
+
+	# -------------------------
+	# Runtime monitor management
+	# -------------------------
+
+	def start_monitor(
+		self,
+		repository: str = "sparesparrow/mcp-prompts",
+		monitored_events: Set[str] = {"WatchEvent", "PullRequestEvent", "IssuesEvent"},
+		interval_seconds: int = 60,
+	) -> int:
+		"""Start a background monitor and return its id."""
+		mon_id = self._next_monitor_id
+		self._next_monitor_id += 1
+		monitor = GithubEventsMonitor(
+			repository=repository,
+			monitored_events=set(monitored_events),
+			github_token=self.github_token,
+			interval_seconds=interval_seconds,
+		)
+		monitor.start()
+		self._monitors[mon_id] = monitor
+		return mon_id
+
+	def stop_monitor(self, mon_id: int) -> bool:
+		"""Stop a running monitor by id."""
+		mon = self._monitors.pop(mon_id, None)
+		if not mon:
+			return False
+		mon.stop()
+		return True
+
+	def get_active_monitors(self) -> List[Dict[str, Any]]:
+		"""List active monitors with basic metadata."""
+		out: List[Dict[str, Any]] = []
+		for mid, m in self._monitors.items():
+			out.append({
+				"id": mid,
+				"repository": m.repository,
+				"monitored_events": sorted(m.monitored_events),
+				"buffer_size": m.buffer_size,
+				"started_at": m.started_at,
+			})
+		return out
+
+	def get_events(self, mon_id: int, limit: int = 100) -> List[Dict[str, Any]]:
+		"""Get most recent collected events for a monitor id."""
+		m = self._monitors.get(mon_id)
+		if not m:
+			return []
+		return m.get_events(limit)
+
+	def get_events_grouped(self, mon_id: int) -> "GitHubEventsCollector.EventDict":
+		"""Group buffered monitor events by type and return EventDict."""
+		m = self._monitors.get(mon_id)
+		result = GitHubEventsCollector.EventDict()
+		if not m:
+			return result
+		grouped = m.get()
+		# grouped is already EventDict, but ensure same type
+		for et in grouped.types():
+			for ev in grouped.get(et):
+				result.add(ev)
+		return result
 
 # Async context manager for the collector
 

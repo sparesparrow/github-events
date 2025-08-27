@@ -51,7 +51,7 @@ jobs:
         run: |
           python - <<'PY'
           import asyncio, os
-          from src.github_events_monitor.collector import GitHubEventsCollector
+          from src.github_events_monitor.event_collector import GitHubEventsCollector
           async def main():
               db_path = 'database/events.db'
               token = os.getenv('GITHUB_TOKEN')

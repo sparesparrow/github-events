@@ -7,6 +7,13 @@ A Python-based service that monitors GitHub Events (WatchEvent, PullRequestEvent
 [Person: Dashboard User] → [Container: GitHub Pages (docs/)] ← [Container: Data Exporter] ← [Container: Events DB (SQLite)] ← [Container: Event Monitor Service] ← [External System: GitHub API /events]
 [Person: API Consumer] → [Container: MCP Server] → [Container: Events DB (SQLite)]
 
+```mermaid
+graph LR
+  user["Person: User"] -->|HTTP/JSON| api["Container: REST API Service\n(FastAPI - metrics & viz)"]
+  api <--> |HTTP (GitHub REST)| gh["External System: GitHub REST API (/events)"]
+  api <--> |SQL (aiosqlite)| db["Container: Database (SQLite)\n(Persist events, query metrics)"]
+```
+
 ## Components
 
 - Event Monitor: Polls GitHub API events, filters target types, stores to SQLite, computes PR metrics.
@@ -233,6 +240,12 @@ curl -X GET "http://localhost:8000/metrics/event-counts?offset_minutes=60" \
   -H "accept: application/json"
 ```
 
+#### Get Event Counts (camelCase alias)
+```bash
+curl -X GET "http://localhost:8000/metrics/event-counts?offsetMinutes=60" \
+  -H "accept: application/json"
+```
+
 #### Get Repository Activity
 ```bash
 curl -X GET "http://localhost:8000/metrics/repository-activity?repo=microsoft/vscode&hours=24" \
@@ -242,6 +255,31 @@ curl -X GET "http://localhost:8000/metrics/repository-activity?repo=microsoft/vs
 #### Get Trending Repositories
 ```bash
 curl -X GET "http://localhost:8000/metrics/trending?hours=24&limit=10" \
+  -H "accept: application/json"
+```
+
+#### Get Event Counts Timeseries (JSON)
+```bash
+curl -X GET "http://localhost:8000/metrics/event-counts-timeseries?hours=6&bucket_minutes=5" \
+  -H "accept: application/json"
+```
+
+#### Get Event Counts Timeseries (repo)
+```bash
+curl -X GET "http://localhost:8000/metrics/event-counts-timeseries?hours=12&bucket_minutes=15&repo=owner/repo" \
+  -H "accept: application/json"
+```
+
+#### Events Timeseries Chart (PNG)
+```bash
+curl -X GET "http://localhost:8000/visualization/event-counts-timeseries?hours=24&bucket_minutes=5&format=png" \
+  -H "accept: image/png" \
+  --output events_timeseries.png
+```
+
+#### Average PR Interval (alias route)
+```bash
+curl -X GET "http://localhost:8000/metrics/avg-pr-interval?repo=owner/repo" \
   -H "accept: application/json"
 ```
 
@@ -446,7 +484,7 @@ pip install -r requirements.txt
 # Initialize database
 python -c "
 import asyncio
-from src.github_events_monitor.collector import GitHubEventsCollector
+from src.github_events_monitor.event_collector import GitHubEventsCollector
 
 async def init():
     collector = GitHubEventsCollector('github_events.db', '$GITHUB_TOKEN')
@@ -806,47 +844,6 @@ subgraph api["Container: REST API (FastAPI/Uvicorn)"]
   direction TB
 
   %% Endpoints / Controllers
-  endpoints["Component: ApiEndpoint classes\n- HealthEndpoint (/health)\n- Metrics* (/metrics/...)\n- Visualization* (/visualization/...)\n- CollectEndpoint (/collect)\n- WebhookEndpoint (/webhook)\n- MCP meta (/mcp/...) "]:::comp
-
-  %% Services
-  metrics_svc["Component: MetricsService\nAggregate counts, PR intervals, activity windows"]:::comp
-  viz_svc["Component: VisualizationService\nBuild images/figures (e.g., Matplotlib/PNG/SVG)"]:::comp
-  health_svc["Component: HealthReporter\nStatus & DB connectivity"]:::comp
-
-  %% Repository / DAO / DB access
-  repo["Component: EventsRepository\nCoordinates data access via DAOs"]:::comp
-  dao_factory["Component: EventsDaoFactory\nCaches DAO instances"]:::comp
-  daos["Component: EventsDao & derived\n- WatchEventDao\n- PullRequestEventDao\n- IssuesEventDao"]:::comp
-  db_pool["Component: DB Connection/Pool\nsqlite3/aiosqlite"]:::comp
-end
-
-%% External/Internal dependencies
-db["Container: Events DB (SQLite)"]:::store
-
-%% Wiring
-endpoints --> metrics_svc
-endpoints --> viz_svc
-endpoints --> health_svc
-metrics_svc --> repo
-viz_svc --> repo
-repo --> dao_factory
-dao_factory --> daos
-daos --> db_pool
-db_pool -->|"SQL (SELECT)"| db
-
-%% Styles
-classDef comp fill:#ffffff,stroke:#888,stroke-width:1px,color:#333;
-classDef store fill:#eef2ff,stroke:#4c6ef5,stroke-width:1px,color:#243972;
-
-```
-```mermaid
-flowchart TD
-
-%% Container boundary
-subgraph api["Container: REST API (FastAPI/Uvicorn)"]
-  direction TB
-
-  %% Endpoints / Controllers
   endpoints["Component: ApiEndpoint classes\n- Health, Metrics, Visualization\n- Collect & Webhook\n- MCP capabilities/tools/resources/prompts"]:::comp
 
   %% Services
@@ -1132,4 +1129,227 @@ github-events-clone/
 ├── scripts/                # Service layer
 ├── scripts/                    # MCP server
 └── database/               # Database schema
+```
+
+## Class Diagram (Key Classes)
+
+```mermaid
+classDiagram
+  direction TB
+
+  class GitHubEventsCollector {
+    +__init__(reader: ApiRequestReader, writer: ApiResponseWriter)
+    +fetch_events(limit) List~GitHubEvent~
+    +fetch_repository_events(repo, limit) List~GitHubEvent~
+    +store_events(events) int
+    +get_event_counts_by_type(offset_minutes) dict
+    +get_avg_pr_interval(repo) dict
+    +get_repository_activity_summary(repo, hours) dict
+    +get_trending_repositories(hours, limit) List~dict~
+    +get_event_counts_timeseries(hours, bucket_minutes) List~dict~
+    +get_pr_timeline(repo, days) List~dict~
+    +start_monitor(repo, monitored_events, interval_seconds) int
+    +stop_monitor(id) bool
+  }
+
+  class ApiRequestReader {
+    +__init__(github_token, user_agent, http_client)
+    +fetch_global_events(since_etag) List~GitHubEvent~
+    +fetch_repo_events(repo, since_etag) List~GitHubEvent~
+    +get_rate_limit() dict
+    +is_throttled() bool
+  }
+
+  class ApiResponseWriter {
+    +__init__(db_path, db_manager)
+    +store_events(events: List~GitHubEvent~) int
+    +upsert_etag(key: str, etag: str)
+    +get_etag(key: str) str
+    +query_events(filter) List~GitHubEvent~
+    +count_by_type(since) dict
+    +avg_pr_interval(repo) dict
+  }
+
+  class GitHubEvent {
+    +id: str
+    +event_type: str
+    +created_at: datetime
+    +repo_name: str
+    +actor_login: str
+    +payload: dict
+  }
+
+  %% Routing and dispatch layer
+  class EndpointType {
+    EVENT_COUNTS
+    AVG_PR_INTERVAL
+    REPO_ACTIVITY_SUMMARY
+    TRENDING_REPOS
+    EVENTS_TIMESERIES
+    PR_TIMELINE
+    START_MONITOR
+    STOP_MONITOR
+    ACTIVE_MONITORS
+    MONITOR_EVENTS
+    MONITOR_EVENTS_GROUPED
+  }
+
+  class EndpointDispatcher {
+    +endpoints: dict~EndpointType, ApiEndpoint~
+    +__init__(collector: GitHubEventsCollector)
+    +register_endpoint(endpoint_type: EndpointType, endpoint: ApiEndpoint)
+    +dispatch(endpoint_type: EndpointType, request: Request) Response
+    +get_route_map() dict~str, EndpointType~
+  }
+
+  class ApiEndpoint {
+    +route: str
+    +method: str
+    +endpoint_type: EndpointType
+    +params_schema: dict
+    +response_schema: dict
+    +__init__(collector: GitHubEventsCollector, endpoint_type: EndpointType)
+    +handle(request: Request) Response
+    +validate_params(params) dict
+  }
+
+  class EventCountsEndpoint {
+    +endpoint_type = EndpointType.EVENT_COUNTS
+    +route="/metrics/event-counts"
+    +method="GET"
+    +handle(request: Request) Response
+  }
+
+  class AvgPrIntervalEndpoint {
+    +endpoint_type = EndpointType.AVG_PR_INTERVAL
+    +route="/metrics/avg-pr-interval"
+    +method="GET"
+    +handle(request: Request) Response
+  }
+
+  class RepoActivitySummaryEndpoint {
+    +endpoint_type = EndpointType.REPO_ACTIVITY_SUMMARY
+    +route="/metrics/repo-activity"
+    +method="GET"
+    +handle(request: Request) Response
+  }
+
+  class TrendingReposEndpoint {
+    +endpoint_type = EndpointType.TRENDING_REPOS
+    +route="/metrics/trending"
+    +method="GET"
+    +handle(request: Request) Response
+  }
+
+  class EventsTimeseriesEndpoint {
+    +endpoint_type = EndpointType.EVENTS_TIMESERIES
+    +route="/metrics/events-timeseries"
+    +method="GET"
+    +handle(request: Request) Response
+  }
+
+  class PrTimelineEndpoint {
+    +endpoint_type = EndpointType.PR_TIMELINE
+    +route="/metrics/pr-timeline"
+    +method="GET"
+    +handle(request: Request) Response
+  }
+
+  class StartMonitorEndpoint {
+    +endpoint_type = EndpointType.START_MONITOR
+    +route="/monitors/start"
+    +method="POST"
+    +handle(request: Request) Response
+  }
+
+  class StopMonitorEndpoint {
+    +endpoint_type = EndpointType.STOP_MONITOR
+    +route="/monitors/123/stop"
+    +method="POST"
+    +handle(request: Request) Response
+  }
+
+  class ActiveMonitorsEndpoint {
+    +endpoint_type = EndpointType.ACTIVE_MONITORS
+    +route="/monitors"
+    +method="GET"
+    +handle(request: Request) Response
+  }
+
+  class MonitorEventsEndpoint {
+    +endpoint_type = EndpointType.MONITOR_EVENTS
+    +route="/monitors/123/events"
+    +method="GET"
+    +handle(request: Request) Response
+  }
+
+  class MonitorEventsGroupedEndpoint {
+    +endpoint_type = EndpointType.MONITOR_EVENTS_GROUPED
+    +route="/monitors/123/events/grouped"
+    +method="GET"
+    +handle(request: Request) Response
+  }
+
+  class Request {
+    +query: dict
+    +body: dict
+    +path_params: dict
+    +headers: dict
+  }
+
+  class Response {
+    +status: int
+    +body: dict
+    +headers: dict
+  }
+
+  %% Relationships
+  GitHubEventsCollector *-- ApiRequestReader : owns
+  GitHubEventsCollector *-- ApiResponseWriter : owns
+  GitHubEventsCollector ..> GitHubEvent : orchestrates
+  ApiRequestReader ..> GitHubEvent : normalizes
+  ApiResponseWriter ..> GitHubEvent : persists
+
+  %% Dispatch relationships
+  EndpointDispatcher *-- ApiEndpoint : owns
+  EndpointDispatcher ..> EndpointType : switches on
+  EndpointDispatcher ..> GitHubEventsCollector : delegates to
+  
+  %% Inheritance
+  ApiEndpoint <|-- EventCountsEndpoint
+  ApiEndpoint <|-- AvgPrIntervalEndpoint
+  ApiEndpoint <|-- RepoActivitySummaryEndpoint
+  ApiEndpoint <|-- TrendingReposEndpoint
+  ApiEndpoint <|-- EventsTimeseriesEndpoint
+  ApiEndpoint <|-- PrTimelineEndpoint
+  ApiEndpoint <|-- StartMonitorEndpoint
+  ApiEndpoint <|-- StopMonitorEndpoint
+  ApiEndpoint <|-- ActiveMonitorsEndpoint
+  ApiEndpoint <|-- MonitorEventsEndpoint
+  ApiEndpoint <|-- MonitorEventsGroupedEndpoint
+
+  %% Endpoint type associations
+  EventCountsEndpoint --> EndpointType : EVENT_COUNTS
+  AvgPrIntervalEndpoint --> EndpointType : AVG_PR_INTERVAL
+  RepoActivitySummaryEndpoint --> EndpointType : REPO_ACTIVITY_SUMMARY
+  TrendingReposEndpoint --> EndpointType : TRENDING_REPOS
+  EventsTimeseriesEndpoint --> EndpointType : EVENTS_TIMESERIES
+  PrTimelineEndpoint --> EndpointType : PR_TIMELINE
+  StartMonitorEndpoint --> EndpointType : START_MONITOR
+  StopMonitorEndpoint --> EndpointType : STOP_MONITOR
+  ActiveMonitorsEndpoint --> EndpointType : ACTIVE_MONITORS
+  MonitorEventsEndpoint --> EndpointType : MONITOR_EVENTS
+  MonitorEventsGroupedEndpoint --> EndpointType : MONITOR_EVENTS_GROUPED
+
+  ApiEndpoint --> Request : handles
+  ApiEndpoint --> Response : returns
+
+
+```
+
+## Updated Imports
+
+Use `event_collector`:
+```python
+from src.github_events_monitor.event_collector import GitHubEventsCollector
 ```

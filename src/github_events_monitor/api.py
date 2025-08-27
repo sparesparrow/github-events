@@ -7,10 +7,11 @@ FastAPI application providing REST endpoints for GitHub Events monitoring metric
 import os
 import asyncio
 from datetime import datetime, timezone, timedelta
-from typing import Dict, List, Optional, Any, Awaitable, Callable, Union
+from typing import Dict, List, Optional, Any, Awaitable, Callable, Union, Protocol, runtime_checkable
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, HTTPException, BackgroundTasks, Query, Depends
+from fastapi import FastAPI, HTTPException, BackgroundTasks, Query, Depends, Request
+from fastapi import APIRouter
 from fastapi.responses import JSONResponse
 from fastapi import Header
 from fastapi.middleware.cors import CORSMiddleware
@@ -21,6 +22,7 @@ import matplotlib.pyplot as plt
 import io
 import logging
 import aiosqlite
+from enum import Enum, auto
 
 from .event_collector import GitHubEventsCollector
 from pathlib import Path
@@ -46,24 +48,36 @@ def _route_exists(target, path: str, method: str) -> bool:
 
 def _register_endpoints_safely(app: FastAPI) -> None:
 	"""Register endpoint classes using existing handler functions without duplicating routes."""
-	endpoint_objects = [
-		HealthEndpoint(handler=health_check),
-		CollectEndpoint(handler=manual_collect),
-		WebhookEndpoint(handler=github_webhook),
-		MetricsEventCountsEndpoint(handler=get_event_counts),
-		MetricsPrIntervalEndpoint(handler=get_pr_interval),
-		MetricsRepositoryActivityEndpoint(handler=get_repository_activity),
-		MetricsTrendingEndpoint(handler=get_trending_repositories),
-		VisualizationTrendingChartEndpoint(handler=get_trending_chart),
-		VisualizationPrTimelineEndpoint(handler=get_pr_timeline_chart),
-		McpCapabilitiesEndpoint(handler=get_mcp_capabilities),
-		McpToolsEndpoint(handler=list_mcp_tools),
-		McpResourcesEndpoint(handler=list_mcp_resources),
-		McpPromptsEndpoint(handler=list_mcp_prompts),
+	# Pairs allow optional dispatcher registration to align with README class diagram
+	endpoint_pairs = [
+		("HEALTH", HealthEndpoint(handler=health_check)),
+		("COLLECT", CollectEndpoint(handler=manual_collect)),
+		("WEBHOOK", WebhookEndpoint(handler=github_webhook)),
+		("EVENT_COUNTS", MetricsEventCountsEndpoint(handler=get_event_counts)),
+		("PR_INTERVAL", MetricsPrIntervalEndpoint(handler=get_pr_interval)),
+		("REPO_ACTIVITY_SUMMARY", MetricsRepositoryActivityEndpoint(handler=get_repository_activity)),
+		("TRENDING_REPOS", MetricsTrendingEndpoint(handler=get_trending_repositories)),
+		("TRENDING_CHART", VisualizationTrendingChartEndpoint(handler=get_trending_chart)),
+		("PR_TIMELINE", VisualizationPrTimelineEndpoint(handler=get_pr_timeline_chart)),
+		("EVENTS_TIMESERIES", EventsTimeseriesEndpoint(handler=get_events_timeseries)),
+		("START_MONITOR", StartMonitorEndpoint(handler=start_monitor)),
+		("STOP_MONITOR", StopMonitorEndpoint(handler=stop_monitor)),
+		("ACTIVE_MONITORS", ActiveMonitorsEndpoint(handler=get_active_monitors)),
+		("MONITOR_EVENTS", MonitorEventsEndpoint(handler=get_monitor_events)),
+		("MONITOR_EVENTS_GROUPED", MonitorEventsGroupedEndpoint(handler=get_monitor_events_grouped)),
+		("MCP_CAPABILITIES", McpCapabilitiesEndpoint(handler=get_mcp_capabilities)),
+		("MCP_TOOLS", McpToolsEndpoint(handler=list_mcp_tools)),
+		("MCP_RESOURCES", McpResourcesEndpoint(handler=list_mcp_resources)),
+		("MCP_PROMPTS", McpPromptsEndpoint(handler=list_mcp_prompts)),
 	]
-	for ep in endpoint_objects:
+	for et, ep in endpoint_pairs:
 		if not _route_exists(app, ep.path, ep.method):
 			ep.register(app)
+		# Best-effort dispatcher registration (created later in this module)
+		try:
+			dispatcher.register_endpoint(getattr(EndpointType, et), ep)  # type: ignore[name-defined]
+		except Exception:
+			pass
 
 
 # ------------------------- Inlined API Endpoints -----------------------------
@@ -248,6 +262,115 @@ class McpPromptsEndpoint(ApiEndpoint):
 		)
 
 
+# ------------------------- EndpointType & Dispatcher -------------------------
+
+class EndpointType(Enum):
+	"""Enumeration of supported endpoint types (aligns with README)."""
+	HEALTH = auto()
+	COLLECT = auto()
+	WEBHOOK = auto()
+	EVENT_COUNTS = auto()
+	PR_INTERVAL = auto()
+	REPO_ACTIVITY_SUMMARY = auto()
+	TRENDING_REPOS = auto()
+	TRENDING_CHART = auto()
+	PR_TIMELINE = auto()
+	EVENTS_TIMESERIES = auto()
+	START_MONITOR = auto()
+	STOP_MONITOR = auto()
+	ACTIVE_MONITORS = auto()
+	MONITOR_EVENTS = auto()
+	MONITOR_EVENTS_GROUPED = auto()
+	MCP_CAPABILITIES = auto()
+	MCP_TOOLS = auto()
+	MCP_RESOURCES = auto()
+	MCP_PROMPTS = auto()
+
+
+class EndpointDispatcher:
+	"""Holds a mapping of EndpointType to ApiEndpoint and exposes a route map."""
+
+	def __init__(self) -> None:
+		self.endpoints: Dict[EndpointType, ApiEndpoint] = {}
+
+	def register_endpoint(self, endpoint_type: EndpointType, endpoint: ApiEndpoint) -> None:
+		self.endpoints[endpoint_type] = endpoint
+
+	def get_route_map(self) -> Dict[str, EndpointType]:
+		"""Return path -> EndpointType mapping for registered endpoints."""
+		return {ep.path: et for et, ep in self.endpoints.items()}
+
+
+# Global dispatcher instance (populated during registration)
+dispatcher = EndpointDispatcher()
+
+
+# ------------------------- Additional Endpoint Classes ----------------------
+
+class EventsTimeseriesEndpoint(ApiEndpoint):
+	def __init__(self, handler: Optional[HttpHandler] = None) -> None:
+		super().__init__(
+			path="/metrics/events-timeseries",
+			method="GET",
+			name="get_events_timeseries",
+			summary="Alias of event-counts-timeseries (JSON timeseries)",
+			handler=handler,
+		)
+
+
+class StartMonitorEndpoint(ApiEndpoint):
+	def __init__(self, handler: Optional[HttpHandler] = None) -> None:
+		super().__init__(
+			path="/monitors/start",
+			method="POST",
+			name="start_monitor",
+			summary="Start a runtime repo monitor",
+			handler=handler,
+		)
+
+
+class StopMonitorEndpoint(ApiEndpoint):
+	def __init__(self, handler: Optional[HttpHandler] = None) -> None:
+		super().__init__(
+			path="/monitors/{mon_id}/stop",
+			method="POST",
+			name="stop_monitor",
+			summary="Stop a runtime repo monitor",
+			handler=handler,
+		)
+
+
+class ActiveMonitorsEndpoint(ApiEndpoint):
+	def __init__(self, handler: Optional[HttpHandler] = None) -> None:
+		super().__init__(
+			path="/monitors",
+			method="GET",
+			name="get_active_monitors",
+			summary="List active runtime monitors",
+			handler=handler,
+		)
+
+
+class MonitorEventsEndpoint(ApiEndpoint):
+	def __init__(self, handler: Optional[HttpHandler] = None) -> None:
+		super().__init__(
+			path="/monitors/{mon_id}/events",
+			method="GET",
+			name="get_monitor_events",
+			summary="List recent buffered events for a monitor",
+			handler=handler,
+		)
+
+
+class MonitorEventsGroupedEndpoint(ApiEndpoint):
+	def __init__(self, handler: Optional[HttpHandler] = None) -> None:
+		super().__init__(
+			path="/monitors/{mon_id}/events/grouped",
+			method="GET",
+			name="get_monitor_events_grouped",
+			summary="Return grouped (by type) buffered events for a monitor",
+			handler=handler,
+		)
 # ------------------------- Inlined Services Layer ----------------------------
 
 logger = logging.getLogger(__name__)
@@ -315,6 +438,15 @@ class EventsRepository:
 		issues_dao = self.dao_factory.get_issues_dao()
 		return await issues_dao.get_issue_activity_summary(repo, since_ts)
 
+	async def event_counts_timeseries(
+		self,
+		since_ts: datetime,
+		bucket_minutes: int = 5,
+		repo: Optional[str] = None,
+	) -> List[Dict[str, Any]]:
+		"""Return total events per time bucket from since_ts to now."""
+		return await self.aggregates.get_event_counts_timeseries(since_ts, bucket_minutes, repo)
+
 
 class MetricsService:
 	"""Component: MetricsService - Aggregate counts, PR intervals, activity windows"""
@@ -343,7 +475,7 @@ class MetricsService:
 			"timestamp": self._now().isoformat()
 		}
 	
-	async def get_pr_interval(self, repo: str) -> Optional[float]:
+	async def get_pr_interval(self, repo: str) -> Optional[Dict[str, Any]]:
 		"""Calculate average time between pull requests for a repository"""
 		result = await self.repository.get_pr_interval_stats(repo)
 		return result
@@ -367,6 +499,16 @@ class MetricsService:
 		repositories = await self.repository.trending_since(since_ts, limit)
 		
 		return repositories
+
+	async def get_event_counts_timeseries(
+		self,
+		hours: int,
+		bucket_minutes: int,
+		repo: Optional[str] = None,
+	) -> List[Dict[str, Any]]:
+		"""Return total events per bucket for a trailing window."""
+		since_ts = self._now() - timedelta(hours=hours)
+		return await self.repository.event_counts_timeseries(since_ts, bucket_minutes, repo)
 
 
 class VisualizationService:
@@ -452,6 +594,41 @@ class VisualizationService:
 		img_buffer.seek(0)
 		return img_buffer.read()
 
+	async def events_timeseries_chart(
+		self,
+		hours: int,
+		bucket_minutes: int,
+		repo: Optional[str] = None,
+		format: str = "png",
+	) -> bytes:
+		"""Generate an events-per-bucket line chart for a repo or global."""
+		from datetime import timedelta
+		since_ts = datetime.now(timezone.utc) - timedelta(hours=hours)
+		series = await self.repository.event_counts_timeseries(since_ts, bucket_minutes, repo)
+		if not series:
+			raise ValueError("No data found for the specified time period")
+		x_values = [s.get("bucket_start") for s in series]
+		y_values = [int(s.get("total", 0)) for s in series]
+		plt.style.use('default')
+		fig, ax = plt.subplots(figsize=(12, 6))
+		ax.plot(x_values, y_values, color='steelblue', linewidth=2, marker='o', markersize=3)
+		ax.fill_between(range(len(y_values)), y_values, color='steelblue', alpha=0.15)
+		title_suffix = f" for {repo}" if repo else " (All Repos)"
+		ax.set_title(f"Events per {bucket_minutes} min bucket (Last {hours}h){title_suffix}")
+		ax.set_xlabel('Time (bucket start)')
+		ax.set_ylabel('Events')
+		ax.grid(axis='y', alpha=0.3)
+		plt.xticks(rotation=45, ha='right')
+		plt.tight_layout()
+		img_buffer = io.BytesIO()
+		if format == "svg":
+			plt.savefig(img_buffer, format='svg', bbox_inches='tight', dpi=150)
+		else:
+			plt.savefig(img_buffer, format='png', bbox_inches='tight', dpi=150)
+		plt.close()
+		img_buffer.seek(0)
+		return img_buffer.read()
+
 
 class HealthReporter:
 	"""Component: HealthReporter - Health status reporting"""
@@ -499,6 +676,58 @@ repository_instance: Optional[EventsRepository] = None
 metrics_service: Optional[MetricsService] = None
 visualization_service: Optional[VisualizationService] = None
 health_reporter: Optional[HealthReporter] = None
+
+# ------------------------- Protocols (SOLID / DI) ----------------------------
+
+@runtime_checkable
+class RepositoryProtocol(Protocol):
+	async def count_events_by_type(self, since_ts: datetime) -> Dict[str, int]: ...
+	async def pr_timestamps(self, repo: str) -> List[datetime]: ...
+	async def activity_by_repo(self, repo: str, since_ts: datetime) -> Dict[str, Any]: ...
+	async def trending_since(self, since_ts: datetime, limit: int) -> List[Dict[str, Any]]: ...
+	async def event_counts_timeseries(self, since_ts: datetime, bucket_minutes: int, repo: Optional[str]) -> List[Dict[str, Any]]: ...
+
+
+@runtime_checkable
+class MetricsServiceProtocol(Protocol):
+	async def get_event_counts(self, offset_minutes: int) -> Dict[str, Any]: ...
+	async def get_pr_interval(self, repo: str) -> Optional[Dict[str, Any]]: ...
+	async def get_repository_activity(self, repo: str, hours: int) -> Dict[str, Any]: ...
+	async def get_trending(self, hours: int, limit: int) -> List[Dict[str, Any]]: ...
+	async def get_event_counts_timeseries(self, hours: int, bucket_minutes: int, repo: Optional[str]) -> List[Dict[str, Any]]: ...
+
+
+@runtime_checkable
+class VisualizationServiceProtocol(Protocol):
+	async def trending_chart(self, hours: int, limit: int, format: str) -> bytes: ...
+	async def pr_timeline(self, repo: str, format: str) -> bytes: ...
+	async def events_timeseries_chart(self, hours: int, bucket_minutes: int, repo: Optional[str], format: str) -> bytes: ...
+
+
+@runtime_checkable
+class HealthReporterProtocol(Protocol):
+	async def status(self) -> Dict[str, Any]: ...
+
+
+def get_metrics_service_dep() -> MetricsServiceProtocol:
+	global metrics_service
+	if metrics_service is None:
+		raise HTTPException(status_code=503, detail="Metrics service not initialized")
+	return metrics_service
+
+
+def get_visualization_service_dep() -> VisualizationServiceProtocol:
+	global visualization_service
+	if visualization_service is None:
+		raise HTTPException(status_code=503, detail="Visualization service not initialized")
+	return visualization_service
+
+
+def get_health_reporter_dep() -> HealthReporterProtocol:
+	global health_reporter
+	if health_reporter is None:
+		raise HTTPException(status_code=503, detail="Health reporter not initialized")
+	return health_reporter
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -564,6 +793,19 @@ class EventCountsResponse(BaseModel):
 	offset_minutes: int = Field(..., description="Time offset in minutes")
 	total_events: int = Field(..., description="Total number of events")
 	counts: Dict[str, int] = Field(..., description="Event counts by type")
+	timestamp: str = Field(..., description="Response timestamp")
+
+class TimeSeriesPoint(BaseModel):
+	"""Point in events-per-bucket series"""
+	bucket_start: str = Field(..., description="Bucket start timestamp (UTC ISO)")
+	total: int = Field(..., description="Total events in bucket")
+
+class EventCountsTimeSeriesResponse(BaseModel):
+	"""Response model for event counts timeseries endpoint"""
+	hours: int = Field(..., description="Window size in hours")
+	bucket_minutes: int = Field(..., description="Bucket size in minutes")
+	repo: Optional[str] = Field(None, description="Optional repository filter")
+	series: List[TimeSeriesPoint] = Field(..., description="List of bucketed counts")
 	timestamp: str = Field(..., description="Response timestamp")
 
 class PRIntervalResponse(BaseModel):
@@ -642,12 +884,9 @@ async def background_poller():
 # API Endpoints
 
 # Health endpoint removed - now registered via HealthEndpoint class only
-async def health_check():
+async def health_check(hr: HealthReporterProtocol = Depends(get_health_reporter_dep)):
 	"""Health check endpoint handler (registered via HealthEndpoint class)"""
-	if health_reporter is None:
-		raise HTTPException(status_code=503, detail="Health reporter not initialized")
-	
-	status_data = await health_reporter.status()
+	status_data = await hr.status()
 	
 	return HealthResponse(
 		status=status_data["status"],
@@ -716,7 +955,9 @@ async def github_webhook(
 
 @app.get("/metrics/event-counts", response_model=EventCountsResponse)
 async def get_event_counts(
-	offset_minutes: int = Query(..., gt=0, description="Number of minutes to look back")
+	offset_minutes: Optional[int] = Query(None, gt=0, description="Number of minutes to look back"),
+	offset_minutes_alias: Optional[int] = Query(None, alias="offsetMinutes", gt=0, description="Number of minutes to look back (camelCase alias)"),
+	ms: MetricsServiceProtocol = Depends(get_metrics_service_dep),
 ):
 	"""
 	Get total number of events grouped by event type for a given offset using MetricsService.
@@ -724,29 +965,27 @@ async def get_event_counts(
 	The offset determines how much time we want to look back.
 	For example, offset_minutes=10 means count events from the last 10 minutes.
 	"""
-	if metrics_service is None:
-		raise HTTPException(status_code=503, detail="Metrics service not initialized")
-	
 	try:
-		result = await metrics_service.get_event_counts(offset_minutes)
+		final_offset = offset_minutes_alias or offset_minutes
+		if not final_offset:
+			raise HTTPException(status_code=422, detail="offset_minutes or offsetMinutes is required and must be > 0")
+		result = await ms.get_event_counts(int(final_offset))
 		return EventCountsResponse(**result)
 	except Exception as e:
 		raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/metrics/pr-interval", response_model=PRIntervalResponse)
 async def get_pr_interval(
-	repo: str = Query(..., description="Repository name (e.g., 'owner/repo')")
+	repo: str = Query(..., description="Repository name (e.g., 'owner/repo')"),
+	ms: MetricsServiceProtocol = Depends(get_metrics_service_dep),
 ):
 	"""
 	Calculate the average time between pull requests for a given repository using MetricsService.
 	
 	Only considers PR 'opened' events for meaningful interval calculation.
 	"""
-	if metrics_service is None:
-		raise HTTPException(status_code=503, detail="Metrics service not initialized")
-	
 	try:
-		result = await metrics_service.get_pr_interval(repo)
+		result = await ms.get_pr_interval(repo)
 		
 		if result is None:
 			return PRIntervalResponse(
@@ -758,17 +997,22 @@ async def get_pr_interval(
 	except Exception as e:
 		raise HTTPException(status_code=500, detail=str(e))
 
+@app.get("/metrics/avg-pr-interval", response_model=PRIntervalResponse)
+async def get_avg_pr_interval(
+	repo: str = Query(..., description="Repository name (e.g., 'owner/repo')")
+):
+	"""Alias of /metrics/pr-interval returning the same payload shape."""
+	return await get_pr_interval(repo)
+
 @app.get("/metrics/repository-activity", response_model=RepositoryActivityResponse)
 async def get_repository_activity(
 	repo: str = Query(..., description="Repository name (e.g., 'owner/repo')"),
-	hours: int = Query(24, gt=0, description="Number of hours to look back")
+	hours: int = Query(24, gt=0, description="Number of hours to look back"),
+	ms: MetricsServiceProtocol = Depends(get_metrics_service_dep),
 ):
 	"""Get detailed activity summary for a specific repository using MetricsService"""
-	if metrics_service is None:
-		raise HTTPException(status_code=503, detail="Metrics service not initialized")
-	
 	try:
-		result = await metrics_service.get_repository_activity(repo, hours)
+		result = await ms.get_repository_activity(repo, hours)
 		return RepositoryActivityResponse(**result)
 	except Exception as e:
 		raise HTTPException(status_code=500, detail=str(e))
@@ -776,14 +1020,12 @@ async def get_repository_activity(
 @app.get("/metrics/trending", response_model=TrendingRepositoriesResponse)
 async def get_trending_repositories(
 	hours: int = Query(24, gt=0, description="Number of hours to look back"),
-	limit: int = Query(10, gt=0, le=50, description="Maximum number of repositories to return")
+	limit: int = Query(10, gt=0, le=50, description="Maximum number of repositories to return"),
+	ms: MetricsServiceProtocol = Depends(get_metrics_service_dep),
 ):
 	"""Get most active repositories by event count using MetricsService"""
-	if metrics_service is None:
-		raise HTTPException(status_code=503, detail="Metrics service not initialized")
-	
 	try:
-		trending_data = await metrics_service.get_trending(hours, limit)
+		trending_data = await ms.get_trending(hours, limit)
 		
 		repositories = [
 			TrendingRepository(**repo_data) for repo_data in trending_data
@@ -801,18 +1043,16 @@ async def get_trending_repositories(
 async def get_trending_chart(
 	hours: int = Query(24, gt=0, description="Number of hours to look back"),
 	limit: int = Query(10, gt=0, le=20, description="Number of top repositories"),
-	format: str = Query("png", pattern="^(png|svg)$", description="Image format")
+	format: str = Query("png", pattern="^(png|svg)$", description="Image format"),
+	vs: VisualizationServiceProtocol = Depends(get_visualization_service_dep),
 ):
 	"""
 	Generate a visualization chart of trending repositories using VisualizationService.
 	
 	This is the bonus visualization endpoint showing repository activity as a bar chart.
 	"""
-	if visualization_service is None:
-		raise HTTPException(status_code=503, detail="Visualization service not initialized")
-	
 	try:
-		image_data = await visualization_service.trending_chart(hours, limit, format)
+		image_data = await vs.trending_chart(hours, limit, format)
 		
 		# Return image response
 		from fastapi.responses import StreamingResponse
@@ -834,17 +1074,15 @@ async def get_trending_chart(
 async def get_pr_timeline_chart(
 	repo: str = Query(..., description="Repository name (e.g., 'owner/repo')"),
 	days: int = Query(7, gt=0, le=30, description="Number of days to look back"),
-    format: str = Query("png", pattern="^(png|svg)$", description="Image format")
+	format: str = Query("png", pattern="^(png|svg)$", description="Image format"),
+	vs: VisualizationServiceProtocol = Depends(get_visualization_service_dep),
 ):
 	"""
 	Generate a timeline visualization of pull request 'opened' events per day using VisualizationService.
 	Returns an image (png/svg). 404 if no data in the given window.
 	"""
-	if visualization_service is None:
-		raise HTTPException(status_code=503, detail="Visualization service not initialized")
-	
 	try:
-		image_data = await visualization_service.pr_timeline(repo, format)
+		image_data = await vs.pr_timeline(repo, format)
 		
 		# Return image response
 		from fastapi.responses import StreamingResponse
@@ -858,6 +1096,113 @@ async def get_pr_timeline_chart(
 		raise HTTPException(status_code=404, detail=str(e))
 	except Exception as e:
 		raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/metrics/event-counts-timeseries", response_model=EventCountsTimeSeriesResponse)
+async def get_event_counts_timeseries(
+	hours: int = Query(24, gt=0, description="Number of hours to look back"),
+	bucket_minutes: int = Query(5, gt=0, le=1440, description="Bucket size in minutes"),
+	repo: Optional[str] = Query(None, description="Optional repository filter (owner/repo)"),
+	ms: MetricsServiceProtocol = Depends(get_metrics_service_dep),
+):
+	"""Return bucketed event counts as JSON for charts or clients."""
+	try:
+		series = await ms.get_event_counts_timeseries(hours, bucket_minutes, repo)
+		return EventCountsTimeSeriesResponse(
+			hours=hours,
+			bucket_minutes=bucket_minutes,
+			repo=repo,
+			series=[TimeSeriesPoint(**p) for p in series],
+			timestamp=datetime.now(timezone.utc).isoformat(),
+		)
+	except Exception as e:
+		raise HTTPException(status_code=500, detail=str(e))
+
+# Alias route to match README class diagram name (EventsTimeseriesEndpoint)
+@app.get("/metrics/events-timeseries", response_model=EventCountsTimeSeriesResponse)
+async def get_events_timeseries(
+	hours: int = Query(24, gt=0, description="Number of hours to look back"),
+	bucket_minutes: int = Query(5, gt=0, le=1440, description="Bucket size in minutes"),
+	repo: Optional[str] = Query(None, description="Optional repository filter (owner/repo)"),
+	ms: MetricsServiceProtocol = Depends(get_metrics_service_dep),
+):
+	"""Alias of event-counts-timeseries returning the same JSON payload."""
+	return await get_event_counts_timeseries(hours=hours, bucket_minutes=bucket_minutes, repo=repo, ms=ms)
+
+@app.get("/visualization/event-counts-timeseries")
+async def get_event_counts_timeseries_chart(
+	hours: int = Query(24, gt=0, description="Number of hours to look back"),
+	bucket_minutes: int = Query(5, gt=0, le=1440, description="Bucket size in minutes"),
+	repo: Optional[str] = Query(None, description="Optional repository filter (owner/repo)"),
+	format: str = Query("png", pattern="^(png|svg)$", description="Image format"),
+	vs: VisualizationServiceProtocol = Depends(get_visualization_service_dep),
+):
+	"""Generate an events timeseries chart for a repo or all repos."""
+	try:
+		image_data = await vs.events_timeseries_chart(hours, bucket_minutes, repo, format)
+		from fastapi.responses import StreamingResponse
+		media_type = "image/svg+xml" if format == "svg" else "image/png"
+		return StreamingResponse(
+			io.BytesIO(image_data),
+			media_type=media_type,
+			headers={
+				"Content-Disposition": f"inline; filename=events_timeseries.{format}"
+			}
+		)
+	except ValueError as e:
+		raise HTTPException(status_code=404, detail=str(e))
+	except Exception as e:
+		raise HTTPException(status_code=500, detail=str(e))
+
+
+# ------------------------- Runtime Monitor Handlers --------------------------
+
+@app.post("/monitors/start")
+async def start_monitor(
+	repository: str = Query(..., description="Repository (owner/repo) to monitor"),
+	monitored_events: Optional[str] = Query(None, description="Comma-separated event types to monitor"),
+	interval_seconds: int = Query(60, gt=0, le=3600, description="Polling interval in seconds"),
+):
+	"""Start a lightweight runtime monitor loop for a repository."""
+	collector = await get_collector_instance()
+	allowed = {"WatchEvent", "PullRequestEvent", "IssuesEvent"}
+	selected = allowed
+	if monitored_events:
+		parts = {p.strip() for p in monitored_events.split(",") if p.strip()}
+		selected = {p for p in parts if p in allowed} or allowed
+	mon_id = collector.start_monitor(repository=repository, monitored_events=selected, interval_seconds=interval_seconds)
+	return {"id": mon_id, "repository": repository, "monitored_events": sorted(list(selected)), "interval_seconds": interval_seconds}
+
+
+@app.post("/monitors/{mon_id}/stop")
+async def stop_monitor(mon_id: int):
+	collector = await get_collector_instance()
+	success = collector.stop_monitor(mon_id)
+	if not success:
+		raise HTTPException(status_code=404, detail="Monitor not found")
+	return {"status": "stopped", "id": mon_id}
+
+
+@app.get("/monitors")
+async def get_active_monitors():
+	collector = await get_collector_instance()
+	return collector.get_active_monitors()
+
+
+@app.get("/monitors/{mon_id}/events")
+async def get_monitor_events(mon_id: int, limit: int = Query(100, gt=0, le=1000)):
+	collector = await get_collector_instance()
+	items = collector.get_events(mon_id, limit)
+	if items is None:
+		raise HTTPException(status_code=404, detail="Monitor not found")
+	return items
+
+
+@app.get("/monitors/{mon_id}/events/grouped")
+async def get_monitor_events_grouped(mon_id: int):
+	collector = await get_collector_instance()
+	grouped = collector.get_events_grouped(mon_id)
+	# Convert EventDict to plain dict of lists
+	return grouped.to_dict()
 
 # MCP capability discovery endpoints
 

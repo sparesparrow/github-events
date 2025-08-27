@@ -18,7 +18,7 @@ jobs:
 
       - name: Build Docker image
         run: |
-          docker build -f docker/Dockerfile -t github-events-monitor .
+          docker build -f Dockerfile -t github-events-monitor .
 
       - name: Initialize and update DB via Docker
         env:
@@ -32,7 +32,7 @@ jobs:
             github-events-monitor \
             python -c "
           import asyncio
-          from src.github_events_monitor.collector import GitHubEventsCollector
+          from src.github_events_monitor.event_collector import GitHubEventsCollector
           async def main():
               collector = GitHubEventsCollector('/app/data/github_events.db', '${{ secrets.GITHUB_TOKEN }}')
               await collector.initialize_database()

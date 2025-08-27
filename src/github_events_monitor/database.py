@@ -37,6 +37,21 @@ class EventsDao:
     async def get(self, repo: Optional[str] = None, since_ts: Optional[datetime] = None) -> List[Dict[str, Any]]:
         raise NotImplementedError
 
+    async def count_total(self, since_ts: datetime) -> int:
+        """Count all events of this DAO's type since timestamp."""
+        db = await self._connect()
+        try:
+            cursor = await db.execute(
+                """
+                SELECT COUNT(*) FROM events
+                WHERE event_type = ? AND created_at >= ?
+                """,
+                (self.event_type, since_ts),
+            )
+            row = await cursor.fetchone()
+            return int(row[0]) if row else 0
+        finally:
+            await db.close()
     async def count_by_repo(self, repo: str, since_ts: datetime) -> int:
         db = await self._connect()
         try:
@@ -288,6 +303,12 @@ class EventsDaoFactory:
     def get_issues_dao(self) -> IssuesEventDao:
         return self.get_dao("IssuesEvent")  # type: ignore
 
+    def get_all_daos(self) -> Dict[str, EventsDao]:
+        """Return all supported DAOs keyed by event type."""
+        for et in ("WatchEvent", "PullRequestEvent", "IssuesEvent"):
+            self.get_dao(et)
+        return dict(self._daos)
+
 
 class SchemaDao:
     def __init__(self, db_path: str):
@@ -374,12 +395,85 @@ class AggregatesDao:
         finally:
             await db.close()
 
+    async def get_event_counts_timeseries(
+        self,
+        since_ts: datetime,
+        bucket_minutes: int = 5,
+        repo: Optional[str] = None,
+    ) -> List[Dict[str, Any]]:
+        """Return a simple time-series of total events per bucket.
+
+        Args:
+            since_ts: Only include events at or after this timestamp (UTC)
+            bucket_minutes: Size of each time bucket in minutes (>0)
+            repo: Optional repository filter ("owner/repo"). If provided, counts
+                  are limited to that repository; otherwise counts are global.
+
+        Returns:
+            List of dicts: [{"bucket_start": iso8601_utc, "total": n}], ordered by time.
+            Includes zero-filled buckets for gaps with no events.
+        """
+        if bucket_minutes <= 0:
+            bucket_minutes = 5
+        bucket_seconds = int(bucket_minutes * 60)
+
+        db = await self._connect()
+        try:
+            params: List[Any] = [bucket_seconds, since_ts]
+            where = "created_at >= ?"
+            if repo:
+                where = "repo_name = ? AND " + where
+                params = [bucket_seconds, repo, since_ts]
+
+            cursor = await db.execute(
+                f"""
+                SELECT CAST(strftime('%s', created_at) / ? AS INTEGER) AS bucket,
+                       COUNT(*) AS total
+                FROM events
+                WHERE {where}
+                GROUP BY bucket
+                ORDER BY bucket ASC
+                """,
+                tuple(params),
+            )
+            rows = await cursor.fetchall()
+
+            # Map returned buckets to counts
+            bucket_to_count: Dict[int, int] = {int(b): int(c) for b, c in rows}
+
+            # Build complete series from since_ts to now, filling gaps with zeros
+            series: List[Dict[str, Any]] = []
+            now_utc = datetime.now(timezone.utc)
+            start_bucket = int(int(datetime.timestamp(since_ts)) // bucket_seconds)
+            end_bucket = int(int(datetime.timestamp(now_utc)) // bucket_seconds)
+
+            for bucket in range(start_bucket, end_bucket + 1):
+                bucket_start_ts = bucket * bucket_seconds
+                bucket_start_iso = datetime.fromtimestamp(bucket_start_ts, tz=timezone.utc).isoformat()
+                series.append({
+                    "bucket_start": bucket_start_iso,
+                    "total": bucket_to_count.get(bucket, 0),
+                })
+
+            return series
+        finally:
+            await db.close()
+
     async def get_counts_by_type_total(self) -> Dict[str, int]:
         db = await self._connect()
         try:
             cursor = await db.execute("SELECT event_type, COUNT(*) FROM events GROUP BY event_type ORDER BY event_type")
             rows = await cursor.fetchall()
             return {str(t): int(c) for t, c in rows}
+        finally:
+            await db.close()
+
+    async def get_total_events(self) -> int:
+        db = await self._connect()
+        try:
+            cursor = await db.execute("SELECT COUNT(*) FROM events")
+            row = await cursor.fetchone()
+            return int(row[0]) if row else 0
         finally:
             await db.close()
 

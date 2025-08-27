@@ -82,6 +82,12 @@ class Config:
 		if self.database_path.startswith('/'):
 			return self.database_path
 		return str(Path.cwd() / self.database_path)
+	
+	def get_database_url(self) -> str:
+		"""Get database URL"""
+		if self.database_url:
+			return self.database_url
+		return f"sqlite:///{self.get_database_path()}"
 
 
 # Global configuration instance
