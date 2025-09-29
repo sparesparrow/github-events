@@ -53,3 +53,83 @@ class PullRequestEvent(GitHubEvent):
 
 class IssuesEvent(GitHubEvent):
     event_type = "IssuesEvent"
+
+
+class PushEvent(GitHubEvent):
+    event_type = "PushEvent"
+
+
+class ForkEvent(GitHubEvent):
+    event_type = "ForkEvent"
+
+
+class CreateEvent(GitHubEvent):
+    event_type = "CreateEvent"
+
+
+class DeleteEvent(GitHubEvent):
+    event_type = "DeleteEvent"
+
+
+class ReleaseEvent(GitHubEvent):
+    event_type = "ReleaseEvent"
+
+
+class CommitCommentEvent(GitHubEvent):
+    event_type = "CommitCommentEvent"
+
+
+class IssueCommentEvent(GitHubEvent):
+    event_type = "IssueCommentEvent"
+
+
+class PullRequestReviewEvent(GitHubEvent):
+    event_type = "PullRequestReviewEvent"
+
+
+class PullRequestReviewCommentEvent(GitHubEvent):
+    event_type = "PullRequestReviewCommentEvent"
+
+
+class PublicEvent(GitHubEvent):
+    event_type = "PublicEvent"
+
+
+class MemberEvent(GitHubEvent):
+    event_type = "MemberEvent"
+
+
+class TeamAddEvent(GitHubEvent):
+    event_type = "TeamAddEvent"
+
+
+class GollumEvent(GitHubEvent):
+    event_type = "GollumEvent"
+
+
+class DeploymentEvent(GitHubEvent):
+    event_type = "DeploymentEvent"
+
+
+class DeploymentStatusEvent(GitHubEvent):
+    event_type = "DeploymentStatusEvent"
+
+
+class StatusEvent(GitHubEvent):
+    event_type = "StatusEvent"
+
+
+class CheckRunEvent(GitHubEvent):
+    event_type = "CheckRunEvent"
+
+
+class CheckSuiteEvent(GitHubEvent):
+    event_type = "CheckSuiteEvent"
+
+
+class SponsorshipEvent(GitHubEvent):
+    event_type = "SponsorshipEvent"
+
+
+class MarketplacePurchaseEvent(GitHubEvent):
+    event_type = "MarketplacePurchaseEvent"

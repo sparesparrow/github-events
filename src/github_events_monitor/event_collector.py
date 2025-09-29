@@ -33,8 +33,41 @@ class GitHubEventsCollector:
 	Provides methods for calculating metrics on stored events.
 	"""
 	
-	# Events we're interested in monitoring
-	MONITORED_EVENTS = {'WatchEvent', 'PullRequestEvent', 'IssuesEvent'}
+	# Events we're interested in monitoring - expanded for comprehensive monitoring
+	MONITORED_EVENTS = {
+		# Core development events
+		'WatchEvent',           # Stars/watching repositories
+		'PullRequestEvent',     # Pull requests opened/closed/merged
+		'IssuesEvent',          # Issues opened/closed/labeled
+		'PushEvent',           # Code pushes to repositories
+		'ForkEvent',           # Repository forks
+		'CreateEvent',         # Branch/tag creation
+		'DeleteEvent',         # Branch/tag deletion
+		'ReleaseEvent',        # Releases published
+		
+		# Collaboration events
+		'CommitCommentEvent',  # Comments on commits
+		'IssueCommentEvent',   # Comments on issues
+		'PullRequestReviewEvent',      # PR reviews
+		'PullRequestReviewCommentEvent', # Comments on PR reviews
+		
+		# Repository management events
+		'PublicEvent',         # Repository made public
+		'MemberEvent',         # Collaborators added/removed
+		'TeamAddEvent',        # Teams added to repositories
+		
+		# Security and maintenance events
+		'GollumEvent',         # Wiki pages created/updated
+		'DeploymentEvent',     # Deployments created
+		'DeploymentStatusEvent', # Deployment status updates
+		'StatusEvent',         # Commit status updates
+		'CheckRunEvent',       # Check runs completed
+		'CheckSuiteEvent',     # Check suites completed
+		
+		# GitHub-specific events
+		'SponsorshipEvent',    # Sponsorship changes
+		'MarketplacePurchaseEvent', # Marketplace purchases
+	}
 	
 	def __init__(
 		self, 
@@ -377,6 +410,579 @@ class GitHubEventsCollector:
 		pr_dao = self._dbm.events.get_pr_dao()
 		series = await pr_dao.get_pr_timeline(repo_name, days)
 		return series
+
+	# -------------------------
+	# Enhanced Monitoring Use Cases
+	# -------------------------
+
+	async def get_repository_health_score(self, repo_name: str, hours: int = 168) -> Dict[str, Any]:
+		"""
+		Calculate comprehensive repository health score based on multiple metrics.
+		
+		Args:
+			repo_name: Repository name
+			hours: Time window for analysis (default: 1 week)
+			
+		Returns:
+			Dictionary with health metrics and scores
+		"""
+		cutoff_time = datetime.now(timezone.utc) - timedelta(hours=hours)
+		aggregates = self._dbm.aggregates
+		
+		# Get activity data
+		activity_data, total_events = await aggregates.get_repository_activity_summary(repo_name, cutoff_time)
+		
+		# Calculate health metrics
+		health_metrics = {
+			'repo_name': repo_name,
+			'analysis_period_hours': hours,
+			'total_events': total_events,
+			'activity_breakdown': activity_data,
+			'health_score': 0.0,
+			'activity_score': 0.0,
+			'collaboration_score': 0.0,
+			'maintenance_score': 0.0,
+			'security_score': 0.0,
+			'timestamp': datetime.now(timezone.utc).isoformat()
+		}
+		
+		# Calculate activity score (0-100)
+		activity_events = ['PushEvent', 'PullRequestEvent', 'IssuesEvent', 'CreateEvent', 'DeleteEvent']
+		activity_count = sum(activity_data.get(event, 0) for event in activity_events)
+		health_metrics['activity_score'] = min(100.0, (activity_count / max(1, hours)) * 10)
+		
+		# Calculate collaboration score (0-100)
+		collab_events = ['PullRequestReviewEvent', 'IssueCommentEvent', 'PullRequestReviewCommentEvent', 'CommitCommentEvent']
+		collab_count = sum(activity_data.get(event, 0) for event in collab_events)
+		health_metrics['collaboration_score'] = min(100.0, (collab_count / max(1, total_events)) * 100)
+		
+		# Calculate maintenance score (0-100)
+		maintenance_events = ['ReleaseEvent', 'DeploymentEvent', 'StatusEvent', 'CheckRunEvent']
+		maintenance_count = sum(activity_data.get(event, 0) for event in maintenance_events)
+		health_metrics['maintenance_score'] = min(100.0, (maintenance_count / max(1, hours)) * 20)
+		
+		# Calculate security score (0-100) - higher is better
+		security_events = ['CheckSuiteEvent', 'StatusEvent', 'DeploymentStatusEvent']
+		security_count = sum(activity_data.get(event, 0) for event in security_events)
+		health_metrics['security_score'] = min(100.0, (security_count / max(1, hours)) * 15)
+		
+		# Calculate overall health score (weighted average)
+		weights = {'activity': 0.3, 'collaboration': 0.25, 'maintenance': 0.25, 'security': 0.2}
+		health_metrics['health_score'] = (
+			health_metrics['activity_score'] * weights['activity'] +
+			health_metrics['collaboration_score'] * weights['collaboration'] +
+			health_metrics['maintenance_score'] * weights['maintenance'] +
+			health_metrics['security_score'] * weights['security']
+		)
+		
+		return health_metrics
+
+	async def get_developer_productivity_metrics(self, repo_name: str, hours: int = 168) -> List[Dict[str, Any]]:
+		"""
+		Analyze developer productivity metrics for a repository.
+		
+		Args:
+			repo_name: Repository name
+			hours: Time window for analysis
+			
+		Returns:
+			List of developer productivity metrics
+		"""
+		cutoff_time = datetime.now(timezone.utc) - timedelta(hours=hours)
+		
+		# Get events grouped by actor
+		async with self._get_db_connection() as db:
+			query = """
+			SELECT 
+				actor_login,
+				event_type,
+				COUNT(*) as event_count,
+				MIN(created_at) as first_activity,
+				MAX(created_at) as last_activity
+			FROM events 
+			WHERE repo_name = ? AND created_at >= ?
+			GROUP BY actor_login, event_type
+			ORDER BY actor_login, event_count DESC
+			"""
+			
+			cursor = await db.execute(query, (repo_name, cutoff_time.isoformat()))
+			rows = await cursor.fetchall()
+			
+		# Process developer metrics
+		developer_stats = defaultdict(lambda: {
+			'actor_login': '',
+			'total_events': 0,
+			'pushes': 0,
+			'prs_opened': 0,
+			'issues_opened': 0,
+			'reviews_given': 0,
+			'comments_made': 0,
+			'releases': 0,
+			'first_activity': None,
+			'last_activity': None,
+			'event_diversity': 0,
+			'productivity_score': 0.0
+		})
+		
+		for row in rows:
+			actor = row[0]
+			event_type = row[1]
+			count = row[2]
+			
+			developer_stats[actor]['actor_login'] = actor
+			developer_stats[actor]['total_events'] += count
+			developer_stats[actor]['first_activity'] = row[3]
+			developer_stats[actor]['last_activity'] = row[4]
+			
+			# Map event types to productivity metrics
+			if event_type == 'PushEvent':
+				developer_stats[actor]['pushes'] += count
+			elif event_type == 'PullRequestEvent':
+				developer_stats[actor]['prs_opened'] += count
+			elif event_type == 'IssuesEvent':
+				developer_stats[actor]['issues_opened'] += count
+			elif event_type == 'PullRequestReviewEvent':
+				developer_stats[actor]['reviews_given'] += count
+			elif event_type in ['IssueCommentEvent', 'PullRequestReviewCommentEvent', 'CommitCommentEvent']:
+				developer_stats[actor]['comments_made'] += count
+			elif event_type == 'ReleaseEvent':
+				developer_stats[actor]['releases'] += count
+		
+		# Calculate productivity scores
+		result = []
+		for actor, stats in developer_stats.items():
+			# Event diversity score (more diverse activity = higher score)
+			event_types = ['pushes', 'prs_opened', 'issues_opened', 'reviews_given', 'comments_made', 'releases']
+			active_types = sum(1 for et in event_types if stats[et] > 0)
+			stats['event_diversity'] = (active_types / len(event_types)) * 100
+			
+			# Productivity score (weighted combination of activities)
+			stats['productivity_score'] = (
+				stats['pushes'] * 2.0 +
+				stats['prs_opened'] * 5.0 +
+				stats['reviews_given'] * 3.0 +
+				stats['comments_made'] * 1.0 +
+				stats['releases'] * 10.0 +
+				stats['event_diversity'] * 0.5
+			)
+			
+			result.append(stats)
+		
+		# Sort by productivity score
+		result.sort(key=lambda x: x['productivity_score'], reverse=True)
+		return result
+
+	async def get_security_monitoring_report(self, repo_name: str, hours: int = 168) -> Dict[str, Any]:
+		"""
+		Generate security monitoring report for a repository.
+		
+		Args:
+			repo_name: Repository name
+			hours: Time window for analysis
+			
+		Returns:
+			Security monitoring report
+		"""
+		cutoff_time = datetime.now(timezone.utc) - timedelta(hours=hours)
+		
+		async with self._get_db_connection() as db:
+			# Get security-related events
+			security_query = """
+			SELECT event_type, COUNT(*) as count, payload
+			FROM events 
+			WHERE repo_name = ? AND created_at >= ?
+			AND event_type IN ('CheckRunEvent', 'CheckSuiteEvent', 'StatusEvent', 'DeploymentStatusEvent', 'PublicEvent', 'MemberEvent')
+			GROUP BY event_type
+			"""
+			
+			cursor = await db.execute(security_query, (repo_name, cutoff_time.isoformat()))
+			security_events = await cursor.fetchall()
+			
+			# Get deployment events for security analysis
+			deployment_query = """
+			SELECT payload, created_at
+			FROM events 
+			WHERE repo_name = ? AND created_at >= ?
+			AND event_type = 'DeploymentEvent'
+			ORDER BY created_at DESC
+			"""
+			
+			cursor = await db.execute(deployment_query, (repo_name, cutoff_time.isoformat()))
+			deployments = await cursor.fetchall()
+		
+		security_report = {
+			'repo_name': repo_name,
+			'analysis_period_hours': hours,
+			'security_events': {},
+			'deployment_security': {
+				'total_deployments': len(deployments),
+				'environments': defaultdict(int),
+				'recent_deployments': []
+			},
+			'security_score': 0.0,
+			'risk_level': 'unknown',
+			'recommendations': [],
+			'timestamp': datetime.now(timezone.utc).isoformat()
+		}
+		
+		# Process security events
+		total_security_events = 0
+		for event_type, count, payload in security_events:
+			security_report['security_events'][event_type] = count
+			total_security_events += count
+		
+		# Analyze deployments
+		for payload_str, created_at in deployments:
+			try:
+				payload = json.loads(payload_str) if isinstance(payload_str, str) else payload_str
+				env = payload.get('deployment', {}).get('environment', 'unknown')
+				security_report['deployment_security']['environments'][env] += 1
+				
+				if len(security_report['deployment_security']['recent_deployments']) < 5:
+					security_report['deployment_security']['recent_deployments'].append({
+						'environment': env,
+						'created_at': created_at,
+						'status': payload.get('deployment', {}).get('state', 'unknown')
+					})
+			except (json.JSONDecodeError, TypeError):
+				continue
+		
+		# Calculate security score
+		check_events = security_report['security_events'].get('CheckRunEvent', 0) + \
+					  security_report['security_events'].get('CheckSuiteEvent', 0)
+		status_events = security_report['security_events'].get('StatusEvent', 0)
+		
+		security_report['security_score'] = min(100.0, (check_events + status_events) / max(1, hours) * 20)
+		
+		# Determine risk level
+		if security_report['security_score'] >= 80:
+			security_report['risk_level'] = 'low'
+		elif security_report['security_score'] >= 50:
+			security_report['risk_level'] = 'medium'
+		else:
+			security_report['risk_level'] = 'high'
+		
+		# Generate recommendations
+		if check_events == 0:
+			security_report['recommendations'].append("Consider setting up automated security checks")
+		if security_report['deployment_security']['total_deployments'] == 0:
+			security_report['recommendations'].append("No deployments detected - consider implementing CI/CD")
+		if security_report['security_events'].get('PublicEvent', 0) > 0:
+			security_report['recommendations'].append("Repository was made public - review access controls")
+		
+		return security_report
+
+	async def detect_event_anomalies(self, repo_name: str, hours: int = 168) -> List[Dict[str, Any]]:
+		"""
+		Detect anomalies in event patterns for a repository.
+		
+		Args:
+			repo_name: Repository name
+			hours: Time window for analysis
+			
+		Returns:
+			List of detected anomalies
+		"""
+		cutoff_time = datetime.now(timezone.utc) - timedelta(hours=hours)
+		
+		async with self._get_db_connection() as db:
+			# Get hourly event counts
+			query = """
+			SELECT 
+				strftime('%Y-%m-%d %H:00:00', created_at) as hour_bucket,
+				event_type,
+				COUNT(*) as count
+			FROM events 
+			WHERE repo_name = ? AND created_at >= ?
+			GROUP BY hour_bucket, event_type
+			ORDER BY hour_bucket, event_type
+			"""
+			
+			cursor = await db.execute(query, (repo_name, cutoff_time.isoformat()))
+			rows = await cursor.fetchall()
+		
+		# Process data for anomaly detection
+		event_data = defaultdict(list)
+		for hour, event_type, count in rows:
+			event_data[event_type].append(count)
+		
+		anomalies = []
+		
+		for event_type, counts in event_data.items():
+			if len(counts) < 3:  # Need at least 3 data points
+				continue
+			
+			# Calculate basic statistics
+			mean_count = statistics.mean(counts)
+			if len(counts) > 1:
+				stdev_count = statistics.stdev(counts)
+			else:
+				stdev_count = 0
+			
+			max_count = max(counts)
+			min_count = min(counts)
+			
+			# Detect spikes (values > mean + 2*stdev)
+			if stdev_count > 0 and max_count > mean_count + 2 * stdev_count:
+				anomalies.append({
+					'type': 'spike',
+					'event_type': event_type,
+					'severity': 'high' if max_count > mean_count + 3 * stdev_count else 'medium',
+					'description': f'Unusual spike in {event_type} activity',
+					'threshold': mean_count + 2 * stdev_count,
+					'actual_value': max_count,
+					'confidence': 0.95,
+					'detected_at': datetime.now(timezone.utc).isoformat()
+				})
+			
+			# Detect drops (values < mean - 2*stdev, but only if mean is significant)
+			if stdev_count > 0 and mean_count > 5 and min_count < max(0, mean_count - 2 * stdev_count):
+				anomalies.append({
+					'type': 'drop',
+					'event_type': event_type,
+					'severity': 'medium',
+					'description': f'Unusual drop in {event_type} activity',
+					'threshold': mean_count - 2 * stdev_count,
+					'actual_value': min_count,
+					'confidence': 0.85,
+					'detected_at': datetime.now(timezone.utc).isoformat()
+				})
+		
+		return anomalies
+
+	async def get_release_deployment_metrics(self, repo_name: str, hours: int = 720) -> Dict[str, Any]:
+		"""
+		Analyze release and deployment patterns for a repository.
+		
+		Args:
+			repo_name: Repository name
+			hours: Time window for analysis (default: 30 days)
+			
+		Returns:
+			Release and deployment metrics
+		"""
+		cutoff_time = datetime.now(timezone.utc) - timedelta(hours=hours)
+		
+		async with self._get_db_connection() as db:
+			# Get release events
+			release_query = """
+			SELECT payload, created_at
+			FROM events 
+			WHERE repo_name = ? AND created_at >= ?
+			AND event_type = 'ReleaseEvent'
+			ORDER BY created_at DESC
+			"""
+			
+			cursor = await db.execute(release_query, (repo_name, cutoff_time.isoformat()))
+			releases = await cursor.fetchall()
+			
+			# Get deployment events
+			deployment_query = """
+			SELECT payload, created_at
+			FROM events 
+			WHERE repo_name = ? AND created_at >= ?
+			AND event_type IN ('DeploymentEvent', 'DeploymentStatusEvent')
+			ORDER BY created_at DESC
+			"""
+			
+			cursor = await db.execute(deployment_query, (repo_name, cutoff_time.isoformat()))
+			deployments = await cursor.fetchall()
+		
+		metrics = {
+			'repo_name': repo_name,
+			'analysis_period_hours': hours,
+			'releases': {
+				'total_count': len(releases),
+				'frequency_per_week': (len(releases) / (hours / 168)) if hours > 0 else 0,
+				'recent_releases': [],
+				'release_types': defaultdict(int)
+			},
+			'deployments': {
+				'total_count': len(deployments),
+				'frequency_per_week': (len(deployments) / (hours / 168)) if hours > 0 else 0,
+				'environments': defaultdict(int),
+				'success_rate': 0.0,
+				'recent_deployments': []
+			},
+			'deployment_lead_time': 0.0,  # Average time from release to deployment
+			'timestamp': datetime.now(timezone.utc).isoformat()
+		}
+		
+		# Process releases
+		release_times = []
+		for payload_str, created_at in releases[:10]:  # Recent 10 releases
+			try:
+				payload = json.loads(payload_str) if isinstance(payload_str, str) else payload_str
+				release_info = payload.get('release', {})
+				
+				metrics['releases']['recent_releases'].append({
+					'tag_name': release_info.get('tag_name', 'unknown'),
+					'name': release_info.get('name', ''),
+					'prerelease': release_info.get('prerelease', False),
+					'created_at': created_at
+				})
+				
+				# Track release types
+				if release_info.get('prerelease', False):
+					metrics['releases']['release_types']['prerelease'] += 1
+				else:
+					metrics['releases']['release_types']['stable'] += 1
+				
+				release_times.append(datetime.fromisoformat(created_at.replace('Z', '+00:00')))
+			except (json.JSONDecodeError, TypeError, ValueError):
+				continue
+		
+		# Process deployments
+		successful_deployments = 0
+		deployment_times = []
+		for payload_str, created_at in deployments[:20]:  # Recent 20 deployments
+			try:
+				payload = json.loads(payload_str) if isinstance(payload_str, str) else payload_str
+				deployment_info = payload.get('deployment', {})
+				
+				env = deployment_info.get('environment', 'unknown')
+				status = deployment_info.get('state', 'unknown')
+				
+				metrics['deployments']['environments'][env] += 1
+				
+				if len(metrics['deployments']['recent_deployments']) < 10:
+					metrics['deployments']['recent_deployments'].append({
+						'environment': env,
+						'status': status,
+						'created_at': created_at
+					})
+				
+				if status in ['success', 'active']:
+					successful_deployments += 1
+				
+				deployment_times.append(datetime.fromisoformat(created_at.replace('Z', '+00:00')))
+			except (json.JSONDecodeError, TypeError, ValueError):
+				continue
+		
+		# Calculate success rate
+		if len(deployments) > 0:
+			metrics['deployments']['success_rate'] = (successful_deployments / len(deployments)) * 100
+		
+		# Calculate deployment lead time (average time between releases and deployments)
+		if release_times and deployment_times:
+			lead_times = []
+			for release_time in release_times:
+				# Find next deployment after this release
+				next_deployments = [dt for dt in deployment_times if dt > release_time]
+				if next_deployments:
+					lead_time = (min(next_deployments) - release_time).total_seconds() / 3600  # hours
+					lead_times.append(lead_time)
+			
+			if lead_times:
+				metrics['deployment_lead_time'] = statistics.mean(lead_times)
+		
+		return metrics
+
+	async def get_community_engagement_metrics(self, repo_name: str, hours: int = 168) -> Dict[str, Any]:
+		"""
+		Analyze community engagement metrics for a repository.
+		
+		Args:
+			repo_name: Repository name
+			hours: Time window for analysis
+			
+		Returns:
+			Community engagement metrics
+		"""
+		cutoff_time = datetime.now(timezone.utc) - timedelta(hours=hours)
+		
+		async with self._get_db_connection() as db:
+			# Get engagement events
+			engagement_query = """
+			SELECT 
+				actor_login,
+				event_type,
+				COUNT(*) as count,
+				MIN(created_at) as first_seen,
+				MAX(created_at) as last_seen
+			FROM events 
+			WHERE repo_name = ? AND created_at >= ?
+			AND event_type IN ('WatchEvent', 'ForkEvent', 'IssuesEvent', 'PullRequestEvent', 
+							  'IssueCommentEvent', 'PullRequestReviewEvent', 'CommitCommentEvent')
+			GROUP BY actor_login, event_type
+			ORDER BY actor_login
+			"""
+			
+			cursor = await db.execute(engagement_query, (repo_name, cutoff_time.isoformat()))
+			engagement_data = await cursor.fetchall()
+		
+		# Process engagement data
+		contributors = defaultdict(lambda: {
+			'actor_login': '',
+			'total_events': 0,
+			'event_types': set(),
+			'first_contribution': None,
+			'last_contribution': None,
+			'engagement_score': 0.0
+		})
+		
+		engagement_events = {
+			'WatchEvent': 1,
+			'ForkEvent': 2,
+			'IssuesEvent': 3,
+			'IssueCommentEvent': 2,
+			'PullRequestEvent': 5,
+			'PullRequestReviewEvent': 4,
+			'CommitCommentEvent': 3
+		}
+		
+		for actor, event_type, count, first_seen, last_seen in engagement_data:
+			contributors[actor]['actor_login'] = actor
+			contributors[actor]['total_events'] += count
+			contributors[actor]['event_types'].add(event_type)
+			contributors[actor]['first_contribution'] = first_seen
+			contributors[actor]['last_contribution'] = last_seen
+			
+			# Calculate engagement score
+			weight = engagement_events.get(event_type, 1)
+			contributors[actor]['engagement_score'] += count * weight
+		
+		# Convert to list and calculate additional metrics
+		contributor_list = []
+		for actor, data in contributors.items():
+			data['event_types'] = list(data['event_types'])
+			data['event_diversity'] = len(data['event_types'])
+			contributor_list.append(data)
+		
+		# Sort by engagement score
+		contributor_list.sort(key=lambda x: x['engagement_score'], reverse=True)
+		
+		metrics = {
+			'repo_name': repo_name,
+			'analysis_period_hours': hours,
+			'total_contributors': len(contributor_list),
+			'new_contributors': len([c for c in contributor_list 
+									if c['first_contribution'] and 
+									datetime.fromisoformat(c['first_contribution'].replace('Z', '+00:00')) >= cutoff_time]),
+			'active_contributors': len([c for c in contributor_list if c['total_events'] >= 3]),
+			'top_contributors': contributor_list[:10],
+			'engagement_distribution': {
+				'high_engagement': len([c for c in contributor_list if c['engagement_score'] >= 20]),
+				'medium_engagement': len([c for c in contributor_list if 5 <= c['engagement_score'] < 20]),
+				'low_engagement': len([c for c in contributor_list if c['engagement_score'] < 5])
+			},
+			'community_health_score': 0.0,
+			'timestamp': datetime.now(timezone.utc).isoformat()
+		}
+		
+		# Calculate community health score
+		total_contributors = max(1, metrics['total_contributors'])
+		active_ratio = metrics['active_contributors'] / total_contributors
+		new_contributor_ratio = metrics['new_contributors'] / total_contributors
+		high_engagement_ratio = metrics['engagement_distribution']['high_engagement'] / total_contributors
+		
+		metrics['community_health_score'] = (
+			active_ratio * 40 +
+			new_contributor_ratio * 30 +
+			high_engagement_ratio * 30
+		) * 100
+		
+		return metrics
 
 	# -------------------------
 	# EventDict functionality

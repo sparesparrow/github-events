@@ -21,3 +21,105 @@ CREATE TABLE IF NOT EXISTS pr_metrics (
     total_prs INTEGER,
     last_updated TEXT DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now'))
 );
+
+-- Enhanced monitoring metrics tables
+CREATE TABLE IF NOT EXISTS repository_health_metrics (
+    repo_name TEXT PRIMARY KEY,
+    health_score REAL,
+    activity_score REAL,
+    collaboration_score REAL,
+    security_score REAL,
+    total_events INTEGER DEFAULT 0,
+    unique_contributors INTEGER DEFAULT 0,
+    avg_issue_resolution_hours REAL,
+    avg_pr_merge_hours REAL,
+    deployment_frequency_per_week REAL,
+    last_release_date TEXT,
+    open_issues_count INTEGER DEFAULT 0,
+    open_prs_count INTEGER DEFAULT 0,
+    fork_count INTEGER DEFAULT 0,
+    star_count INTEGER DEFAULT 0,
+    last_updated TEXT DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_repo_health_score ON repository_health_metrics(health_score);
+CREATE INDEX IF NOT EXISTS idx_repo_activity_score ON repository_health_metrics(activity_score);
+
+-- Developer productivity metrics
+CREATE TABLE IF NOT EXISTS developer_metrics (
+    actor_login TEXT,
+    repo_name TEXT,
+    commits_count INTEGER DEFAULT 0,
+    prs_opened INTEGER DEFAULT 0,
+    prs_merged INTEGER DEFAULT 0,
+    issues_opened INTEGER DEFAULT 0,
+    issues_closed INTEGER DEFAULT 0,
+    reviews_given INTEGER DEFAULT 0,
+    comments_made INTEGER DEFAULT 0,
+    productivity_score REAL,
+    collaboration_score REAL,
+    time_period TEXT, -- 'daily', 'weekly', 'monthly'
+    period_start TEXT,
+    period_end TEXT,
+    last_updated TEXT DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now')),
+    PRIMARY KEY (actor_login, repo_name, time_period, period_start)
+);
+
+CREATE INDEX IF NOT EXISTS idx_dev_productivity ON developer_metrics(productivity_score);
+CREATE INDEX IF NOT EXISTS idx_dev_period ON developer_metrics(time_period, period_start);
+
+-- Security and quality metrics
+CREATE TABLE IF NOT EXISTS security_metrics (
+    repo_name TEXT,
+    metric_type TEXT, -- 'vulnerability', 'dependency_update', 'security_advisory', 'code_quality'
+    severity TEXT,    -- 'low', 'medium', 'high', 'critical'
+    count INTEGER DEFAULT 0,
+    last_occurrence TEXT,
+    resolved_count INTEGER DEFAULT 0,
+    avg_resolution_hours REAL,
+    date TEXT,
+    last_updated TEXT DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now')),
+    PRIMARY KEY (repo_name, metric_type, date)
+);
+
+CREATE INDEX IF NOT EXISTS idx_security_severity ON security_metrics(severity);
+CREATE INDEX IF NOT EXISTS idx_security_type ON security_metrics(metric_type);
+
+-- Event patterns and anomalies
+CREATE TABLE IF NOT EXISTS event_patterns (
+    repo_name TEXT,
+    event_type TEXT,
+    pattern_type TEXT, -- 'spike', 'drop', 'trend', 'anomaly'
+    severity TEXT,     -- 'low', 'medium', 'high'
+    description TEXT,
+    threshold_value REAL,
+    actual_value REAL,
+    confidence_score REAL,
+    detected_at TEXT,
+    resolved_at TEXT,
+    last_updated TEXT DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now')),
+    PRIMARY KEY (repo_name, event_type, pattern_type, detected_at)
+);
+
+CREATE INDEX IF NOT EXISTS idx_patterns_severity ON event_patterns(severity);
+CREATE INDEX IF NOT EXISTS idx_patterns_detected ON event_patterns(detected_at);
+
+-- Release and deployment tracking
+CREATE TABLE IF NOT EXISTS deployment_metrics (
+    repo_name TEXT,
+    deployment_id TEXT,
+    environment TEXT,  -- 'production', 'staging', 'development'
+    status TEXT,       -- 'pending', 'in_progress', 'success', 'failure', 'error'
+    created_at TEXT,
+    updated_at TEXT,
+    duration_seconds INTEGER,
+    commit_sha TEXT,
+    tag_name TEXT,
+    deployment_url TEXT,
+    last_updated TEXT DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now')),
+    PRIMARY KEY (repo_name, deployment_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_deployment_status ON deployment_metrics(status);
+CREATE INDEX IF NOT EXISTS idx_deployment_env ON deployment_metrics(environment);
+CREATE INDEX IF NOT EXISTS idx_deployment_created ON deployment_metrics(created_at);

@@ -1,6 +1,6 @@
 # GitHub Events Monitor
 
-A Python-based service that monitors GitHub Events (WatchEvent, PullRequestEvent, IssuesEvent), stores them in SQLite, exposes data through an MCP server (each tool = API endpoint), and publishes interactive visualizations to a GitHub Pages site from the docs/ folder.
+A comprehensive Python-based service that monitors **23 different GitHub event types**, provides advanced repository analytics, and offers extensive monitoring capabilities. Features include repository health scoring, developer productivity analysis, security monitoring, anomaly detection, and community engagement metrics.
 
 ## Architecture (C4 L1)
 
@@ -16,12 +16,15 @@ graph LR
 
 ## Components
 
-- Event Monitor: Polls GitHub API events, filters target types, stores to SQLite, computes PR metrics.
-  - Can monitor specific repositories via `TARGET_REPOSITORIES` environment variable
-  - Falls back to public events if no target repositories specified
-- MCP Server: Tools to retrieve metrics/data directly from the DB.
-- Data Exporter: Builds docs/data.json and Plotly HTML charts in docs/.
-- GitHub Pages: Static dashboard served from docs/.
+- **Enhanced Event Monitor**: Monitors 23+ GitHub event types including development, collaboration, security, and deployment events
+  - Comprehensive event filtering and processing
+  - Advanced metrics calculation and health scoring
+  - Anomaly detection and pattern analysis
+- **Advanced Analytics Engine**: Repository health, developer productivity, security monitoring, and community engagement analysis
+- **MCP Server**: Enhanced tools for AI integration with comprehensive monitoring capabilities
+- **REST API**: 15+ endpoints for metrics, analytics, and monitoring
+- **Data Exporter**: Builds docs/data.json and interactive visualizations
+- **GitHub Pages**: Static dashboard with live API integration
 
 ## Configuration
 
@@ -1219,12 +1222,25 @@ flowchart TB
 ```
 
 ### 🌐 API Endpoints
+
+#### Core Metrics
 - **Health**: `GET /health`
 - **Event Counts**: `GET /metrics/event-counts?offset_minutes=60`
 - **PR Intervals**: `GET /metrics/pr-interval?repo=owner/repo`
 - **Repository Activity**: `GET /metrics/repository-activity?repo=owner/repo&hours=24`
 - **Trending Repos**: `GET /metrics/trending?hours=24&limit=10`
-- **Visualization**: `GET /visualization/trending-chart?hours=24&limit=5&format=png`
+
+#### Enhanced Monitoring
+- **Repository Health**: `GET /metrics/repository-health?repo=owner/repo&hours=168`
+- **Developer Productivity**: `GET /metrics/developer-productivity?repo=owner/repo&hours=168`
+- **Security Monitoring**: `GET /metrics/security-monitoring?repo=owner/repo&hours=168`
+- **Event Anomalies**: `GET /metrics/event-anomalies?repo=owner/repo&hours=168`
+- **Release/Deployment**: `GET /metrics/release-deployment?repo=owner/repo&hours=720`
+- **Community Engagement**: `GET /metrics/community-engagement?repo=owner/repo&hours=168`
+- **Event Types Summary**: `GET /metrics/event-types-summary?repo=owner/repo&hours=168`
+
+#### Visualization & Docs
+- **Trending Chart**: `GET /visualization/trending-chart?hours=24&limit=5&format=png`
 - **Interactive API Docs**: `http://localhost:8000/docs`
 
 ### 📈 Live Dashboard URLs
