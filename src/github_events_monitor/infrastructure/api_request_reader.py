@@ -9,7 +9,20 @@ from src.github_events_monitor.domain.events import GitHubEvent
 
 GITHUB_EVENTS_URL = "https://api.github.com/events"
 GITHUB_REPO_EVENTS_URL = "https://api.github.com/repos/{repo}/events"
-INTERESTED_TYPES = {"WatchEvent", "PullRequestEvent", "IssuesEvent"}
+# Expanded list of GitHub events we care about for monitoring use-cases
+INTERESTED_TYPES = {
+    "WatchEvent",                     # Stars
+    "PullRequestEvent",               # PR open/close/merge
+    "IssuesEvent",                    # Issues open/close/etc
+    "IssueCommentEvent",              # First response time, engagement
+    "PushEvent",                      # Commit and push activity
+    "ReleaseEvent",                   # Releases published
+    "PullRequestReviewEvent",         # Review activity
+    "PullRequestReviewCommentEvent",  # Review comments
+    "ForkEvent",                      # Fork activity
+    "CreateEvent",                    # Branch/repo creation
+    "DeleteEvent",                    # Branch deletion
+}
 
 
 class ApiRequestReader:
