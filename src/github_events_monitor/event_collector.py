@@ -291,6 +291,16 @@ class GitHubEventsCollector:
 		]
 		stored_count = await write_dao.insert_events(payloads)
 		
+		# Process PushEvents for commit details
+		push_events = [event for event in events if event.event_type == 'PushEvent']
+		if push_events:
+			logger.info(f"Processing {len(push_events)} PushEvents for commit details")
+			for push_event in push_events:
+				try:
+					await self.process_push_event_commits(push_event)
+				except Exception as e:
+					logger.error(f"Failed to process commits for PushEvent {push_event.id}: {e}")
+		
 		logger.info(f"Stored {stored_count} new events")
 		return stored_count
 	
@@ -983,6 +993,617 @@ class GitHubEventsCollector:
 		) * 100
 		
 		return metrics
+
+	# -------------------------
+	# Commit Monitoring and Change Tracking
+	# -------------------------
+
+	async def process_push_event_commits(self, push_event: GitHubEvent) -> List[Dict[str, Any]]:
+		"""
+		Process commits from a PushEvent and fetch detailed commit information.
+		
+		Args:
+			push_event: PushEvent containing commit references
+			
+		Returns:
+			List of processed commit data
+		"""
+		if push_event.event_type != 'PushEvent':
+			return []
+		
+		payload = push_event.payload
+		commits = payload.get('commits', [])
+		repo_name = push_event.repo_name
+		branch_name = payload.get('ref', '').replace('refs/heads/', '') if payload.get('ref') else 'unknown'
+		
+		processed_commits = []
+		
+		for commit_data in commits:
+			sha = commit_data.get('sha')
+			if not sha:
+				continue
+			
+			# Check if we already have this commit
+			async with self._get_db_connection() as db:
+				cursor = await db.execute(
+					"SELECT sha FROM commits WHERE sha = ?", (sha,)
+				)
+				existing = await cursor.fetchone()
+				if existing:
+					continue  # Skip if already processed
+			
+			# Fetch detailed commit information from GitHub API
+			detailed_commit = await self._fetch_commit_details(repo_name, sha)
+			if not detailed_commit:
+				continue
+			
+			# Process and store commit
+			commit_info = await self._process_commit_data(
+				detailed_commit, push_event.id, branch_name, repo_name
+			)
+			processed_commits.append(commit_info)
+		
+		return processed_commits
+
+	async def _fetch_commit_details(self, repo_name: str, sha: str) -> Optional[Dict[str, Any]]:
+		"""
+		Fetch detailed commit information from GitHub API.
+		
+		Args:
+			repo_name: Repository name
+			sha: Commit SHA
+			
+		Returns:
+			Detailed commit data or None if failed
+		"""
+		async with httpx.AsyncClient(timeout=30.0) as client:
+			try:
+				response = await client.get(
+					f"{self.api_base}/repos/{repo_name}/commits/{sha}",
+					headers=self._get_headers()
+				)
+				
+				if response.status_code == 429:
+					# Rate limited - skip for now
+					logger.warning(f"Rate limited fetching commit {sha}")
+					return None
+				
+				if response.status_code == 404:
+					logger.warning(f"Commit {sha} not found in {repo_name}")
+					return None
+				
+				response.raise_for_status()
+				return response.json()
+				
+			except httpx.RequestError as e:
+				logger.error(f"Failed to fetch commit {sha}: {e}")
+				return None
+			except Exception as e:
+				logger.error(f"Unexpected error fetching commit {sha}: {e}")
+				return None
+
+	async def _process_commit_data(
+		self, 
+		commit_data: Dict[str, Any], 
+		push_event_id: str, 
+		branch_name: str, 
+		repo_name: str
+	) -> Dict[str, Any]:
+		"""
+		Process and store detailed commit data.
+		
+		Args:
+			commit_data: Detailed commit data from GitHub API
+			push_event_id: Associated PushEvent ID
+			branch_name: Branch name
+			repo_name: Repository name
+			
+		Returns:
+			Processed commit information
+		"""
+		sha = commit_data.get('sha')
+		commit_info = commit_data.get('commit', {})
+		author_info = commit_data.get('author', {}) or {}
+		committer_info = commit_data.get('committer', {}) or {}
+		stats = commit_data.get('stats', {})
+		files = commit_data.get('files', [])
+		
+		# Extract commit information
+		commit_record = {
+			'sha': sha,
+			'repo_name': repo_name,
+			'author_name': commit_info.get('author', {}).get('name'),
+			'author_email': commit_info.get('author', {}).get('email'),
+			'author_login': author_info.get('login'),
+			'committer_name': commit_info.get('committer', {}).get('name'),
+			'committer_email': commit_info.get('committer', {}).get('email'),
+			'message': commit_info.get('message', ''),
+			'commit_date': commit_info.get('author', {}).get('date'),
+			'push_event_id': push_event_id,
+			'branch_name': branch_name,
+			'parent_shas': json.dumps([p.get('sha') for p in commit_data.get('parents', [])]),
+			'stats_additions': stats.get('additions', 0),
+			'stats_deletions': stats.get('deletions', 0),
+			'stats_total_changes': stats.get('total', 0),
+			'files_changed': len(files)
+		}
+		
+		# Store commit record
+		async with self._get_db_connection() as db:
+			await db.execute("""
+				INSERT OR REPLACE INTO commits (
+					sha, repo_name, author_name, author_email, author_login,
+					committer_name, committer_email, message, commit_date,
+					push_event_id, branch_name, parent_shas, stats_additions,
+					stats_deletions, stats_total_changes, files_changed
+				) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			""", (
+				commit_record['sha'], commit_record['repo_name'],
+				commit_record['author_name'], commit_record['author_email'],
+				commit_record['author_login'], commit_record['committer_name'],
+				commit_record['committer_email'], commit_record['message'],
+				commit_record['commit_date'], commit_record['push_event_id'],
+				commit_record['branch_name'], commit_record['parent_shas'],
+				commit_record['stats_additions'], commit_record['stats_deletions'],
+				commit_record['stats_total_changes'], commit_record['files_changed']
+			))
+			
+			# Store file changes
+			for file_data in files:
+				await db.execute("""
+					INSERT OR REPLACE INTO commit_files (
+						commit_sha, repo_name, filename, status, additions,
+						deletions, changes, patch, previous_filename
+					) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+				""", (
+					sha, repo_name, file_data.get('filename'),
+					file_data.get('status'), file_data.get('additions', 0),
+					file_data.get('deletions', 0), file_data.get('changes', 0),
+					file_data.get('patch'), file_data.get('previous_filename')
+				))
+			
+			await db.commit()
+		
+		# Generate commit summary
+		summary = await self._generate_commit_summary(commit_record, files)
+		
+		return {
+			'commit': commit_record,
+			'files': files,
+			'summary': summary
+		}
+
+	async def _generate_commit_summary(
+		self, 
+		commit_record: Dict[str, Any], 
+		files: List[Dict[str, Any]]
+	) -> Dict[str, Any]:
+		"""
+		Generate automated summary and analysis of commit changes.
+		
+		Args:
+			commit_record: Commit information
+			files: List of changed files
+			
+		Returns:
+			Commit summary and analysis
+		"""
+		sha = commit_record['sha']
+		repo_name = commit_record['repo_name']
+		message = commit_record.get('message', '')
+		
+		# Analyze commit message and changes
+		change_categories = self._categorize_changes(message, files)
+		impact_score = self._calculate_impact_score(commit_record, files)
+		risk_level = self._assess_risk_level(commit_record, files, change_categories)
+		breaking_changes = self._detect_breaking_changes(message, files)
+		security_relevant = self._detect_security_relevance(message, files)
+		performance_impact = self._assess_performance_impact(message, files)
+		
+		# Generate summaries
+		short_summary = self._generate_short_summary(message, files, change_categories)
+		detailed_summary = self._generate_detailed_summary(
+			commit_record, files, change_categories, impact_score
+		)
+		
+		summary_record = {
+			'commit_sha': sha,
+			'repo_name': repo_name,
+			'summary_type': 'auto',
+			'short_summary': short_summary,
+			'detailed_summary': detailed_summary,
+			'change_categories': json.dumps(change_categories),
+			'impact_score': impact_score,
+			'risk_level': risk_level,
+			'breaking_changes': breaking_changes,
+			'security_relevant': security_relevant,
+			'performance_impact': performance_impact,
+			'complexity_score': self._calculate_complexity_score(files)
+		}
+		
+		# Store summary
+		async with self._get_db_connection() as db:
+			await db.execute("""
+				INSERT OR REPLACE INTO commit_summaries (
+					commit_sha, repo_name, summary_type, short_summary,
+					detailed_summary, change_categories, impact_score,
+					risk_level, breaking_changes, security_relevant,
+					performance_impact, complexity_score
+				) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			""", (
+				summary_record['commit_sha'], summary_record['repo_name'],
+				summary_record['summary_type'], summary_record['short_summary'],
+				summary_record['detailed_summary'], summary_record['change_categories'],
+				summary_record['impact_score'], summary_record['risk_level'],
+				summary_record['breaking_changes'], summary_record['security_relevant'],
+				summary_record['performance_impact'], summary_record['complexity_score']
+			))
+			await db.commit()
+		
+		return summary_record
+
+	def _categorize_changes(self, message: str, files: List[Dict[str, Any]]) -> List[str]:
+		"""Categorize the type of changes made in the commit."""
+		categories = set()
+		message_lower = message.lower()
+		
+		# Message-based categorization
+		if any(word in message_lower for word in ['fix', 'bug', 'error', 'issue']):
+			categories.add('bugfix')
+		if any(word in message_lower for word in ['feat', 'feature', 'add', 'implement']):
+			categories.add('feature')
+		if any(word in message_lower for word in ['refactor', 'cleanup', 'reorganize']):
+			categories.add('refactor')
+		if any(word in message_lower for word in ['doc', 'readme', 'comment']):
+			categories.add('documentation')
+		if any(word in message_lower for word in ['test', 'spec', 'coverage']):
+			categories.add('testing')
+		if any(word in message_lower for word in ['perf', 'performance', 'optimize']):
+			categories.add('performance')
+		if any(word in message_lower for word in ['security', 'vulnerability', 'auth']):
+			categories.add('security')
+		if any(word in message_lower for word in ['break', 'breaking', 'major']):
+			categories.add('breaking')
+		
+		# File-based categorization
+		for file_data in files:
+			filename = file_data.get('filename', '').lower()
+			if any(ext in filename for ext in ['.md', '.txt', '.rst', 'readme']):
+				categories.add('documentation')
+			elif any(ext in filename for ext in ['test', 'spec', '.test.', '.spec.']):
+				categories.add('testing')
+			elif any(ext in filename for ext in ['.yml', '.yaml', '.json', 'config']):
+				categories.add('configuration')
+			elif any(ext in filename for ext in ['.sql', 'migration', 'schema']):
+				categories.add('database')
+			elif any(ext in filename for ext in ['docker', '.dockerfile', 'compose']):
+				categories.add('infrastructure')
+		
+		return list(categories) if categories else ['other']
+
+	def _calculate_impact_score(self, commit_record: Dict[str, Any], files: List[Dict[str, Any]]) -> float:
+		"""Calculate impact score (0-100) based on commit size and changes."""
+		total_changes = commit_record.get('stats_total_changes', 0)
+		files_changed = len(files)
+		
+		# Base score from changes
+		change_score = min(50, total_changes / 10)  # Up to 50 points for changes
+		file_score = min(30, files_changed * 3)     # Up to 30 points for files
+		
+		# Bonus for certain file types
+		critical_files = sum(1 for f in files 
+							if any(pattern in f.get('filename', '').lower() 
+								  for pattern in ['package.json', 'requirements.txt', 'dockerfile', 'config']))
+		critical_score = min(20, critical_files * 10)  # Up to 20 points for critical files
+		
+		return min(100.0, change_score + file_score + critical_score)
+
+	def _assess_risk_level(
+		self, 
+		commit_record: Dict[str, Any], 
+		files: List[Dict[str, Any]], 
+		categories: List[str]
+	) -> str:
+		"""Assess risk level of the commit."""
+		if 'breaking' in categories or 'security' in categories:
+			return 'high'
+		
+		total_changes = commit_record.get('stats_total_changes', 0)
+		files_changed = len(files)
+		
+		if total_changes > 500 or files_changed > 20:
+			return 'high'
+		elif total_changes > 100 or files_changed > 5:
+			return 'medium'
+		else:
+			return 'low'
+
+	def _detect_breaking_changes(self, message: str, files: List[Dict[str, Any]]) -> bool:
+		"""Detect if commit contains breaking changes."""
+		message_lower = message.lower()
+		breaking_keywords = ['breaking', 'break', 'major', 'incompatible', 'deprecated']
+		
+		if any(keyword in message_lower for keyword in breaking_keywords):
+			return True
+		
+		# Check for API changes in certain files
+		api_files = [f for f in files if any(pattern in f.get('filename', '').lower() 
+											for pattern in ['api', 'interface', 'contract'])]
+		return len(api_files) > 0
+
+	def _detect_security_relevance(self, message: str, files: List[Dict[str, Any]]) -> bool:
+		"""Detect if commit is security-relevant."""
+		message_lower = message.lower()
+		security_keywords = ['security', 'vulnerability', 'auth', 'password', 'token', 'cve']
+		
+		if any(keyword in message_lower for keyword in security_keywords):
+			return True
+		
+		# Check for security-related files
+		security_files = [f for f in files if any(pattern in f.get('filename', '').lower() 
+												 for pattern in ['auth', 'security', 'crypto', 'ssl', 'tls'])]
+		return len(security_files) > 0
+
+	def _assess_performance_impact(self, message: str, files: List[Dict[str, Any]]) -> str:
+		"""Assess performance impact of the commit."""
+		message_lower = message.lower()
+		
+		if any(word in message_lower for word in ['optimize', 'performance', 'faster', 'speed']):
+			return 'positive'
+		elif any(word in message_lower for word in ['slow', 'lag', 'bottleneck']):
+			return 'negative'
+		
+		return 'unknown'
+
+	def _calculate_complexity_score(self, files: List[Dict[str, Any]]) -> float:
+		"""Calculate complexity score based on file changes."""
+		if not files:
+			return 0.0
+		
+		total_complexity = 0
+		for file_data in files:
+			changes = file_data.get('changes', 0)
+			# More changes = higher complexity
+			file_complexity = min(10, changes / 10)
+			total_complexity += file_complexity
+		
+		return min(100.0, total_complexity)
+
+	def _generate_short_summary(
+		self, 
+		message: str, 
+		files: List[Dict[str, Any]], 
+		categories: List[str]
+	) -> str:
+		"""Generate a short summary of the commit."""
+		# Use first line of commit message if available
+		first_line = message.split('\n')[0] if message else ''
+		if len(first_line) > 80:
+			first_line = first_line[:77] + '...'
+		
+		if not first_line:
+			# Generate based on files and categories
+			if 'bugfix' in categories:
+				first_line = f"Fixed issues in {len(files)} files"
+			elif 'feature' in categories:
+				first_line = f"Added new features in {len(files)} files"
+			elif 'documentation' in categories:
+				first_line = f"Updated documentation in {len(files)} files"
+			else:
+				first_line = f"Modified {len(files)} files"
+		
+		return first_line
+
+	def _generate_detailed_summary(
+		self, 
+		commit_record: Dict[str, Any], 
+		files: List[Dict[str, Any]], 
+		categories: List[str], 
+		impact_score: float
+	) -> str:
+		"""Generate a detailed summary of the commit."""
+		message = commit_record.get('message', '')
+		stats_additions = commit_record.get('stats_additions', 0)
+		stats_deletions = commit_record.get('stats_deletions', 0)
+		
+		summary_parts = []
+		
+		# Basic stats
+		summary_parts.append(f"Modified {len(files)} files with {stats_additions} additions and {stats_deletions} deletions.")
+		
+		# Categories
+		if categories:
+			summary_parts.append(f"Categories: {', '.join(categories)}")
+		
+		# File breakdown
+		if files:
+			file_types = {}
+			for file_data in files:
+				filename = file_data.get('filename', '')
+				ext = filename.split('.')[-1] if '.' in filename else 'other'
+				file_types[ext] = file_types.get(ext, 0) + 1
+			
+			if file_types:
+				file_breakdown = ', '.join([f"{count} {ext}" for ext, count in file_types.items()])
+				summary_parts.append(f"File types: {file_breakdown}")
+		
+		# Impact assessment
+		impact_level = 'high' if impact_score >= 70 else 'medium' if impact_score >= 40 else 'low'
+		summary_parts.append(f"Impact level: {impact_level} (score: {impact_score:.1f})")
+		
+		# Original commit message (first few lines)
+		if message:
+			message_preview = '\n'.join(message.split('\n')[:3])
+			if len(message_preview) > 200:
+				message_preview = message_preview[:197] + '...'
+			summary_parts.append(f"Original message: {message_preview}")
+		
+		return ' '.join(summary_parts)
+
+	async def get_recent_commits(
+		self, 
+		repo_name: str, 
+		hours: int = 24, 
+		limit: int = 50
+	) -> List[Dict[str, Any]]:
+		"""
+		Get recent commits for a repository with summaries.
+		
+		Args:
+			repo_name: Repository name
+			hours: Hours to look back
+			limit: Maximum number of commits
+			
+		Returns:
+			List of recent commits with summaries
+		"""
+		cutoff_time = datetime.now(timezone.utc) - timedelta(hours=hours)
+		
+		async with self._get_db_connection() as db:
+			query = """
+			SELECT 
+				c.sha, c.author_name, c.author_login, c.message, c.commit_date,
+				c.branch_name, c.stats_additions, c.stats_deletions, 
+				c.stats_total_changes, c.files_changed,
+				cs.short_summary, cs.detailed_summary, cs.change_categories,
+				cs.impact_score, cs.risk_level, cs.breaking_changes,
+				cs.security_relevant, cs.performance_impact
+			FROM commits c
+			LEFT JOIN commit_summaries cs ON c.sha = cs.commit_sha
+			WHERE c.repo_name = ? AND c.commit_date >= ?
+			ORDER BY c.commit_date DESC
+			LIMIT ?
+			"""
+			
+			cursor = await db.execute(query, (repo_name, cutoff_time.isoformat(), limit))
+			rows = await cursor.fetchall()
+		
+		commits = []
+		for row in rows:
+			commit_data = {
+				'sha': row[0],
+				'author_name': row[1],
+				'author_login': row[2],
+				'message': row[3],
+				'commit_date': row[4],
+				'branch_name': row[5],
+				'stats': {
+					'additions': row[6],
+					'deletions': row[7],
+					'total_changes': row[8]
+				},
+				'files_changed': row[9],
+				'summary': {
+					'short': row[10],
+					'detailed': row[11],
+					'categories': json.loads(row[12]) if row[12] else [],
+					'impact_score': row[13],
+					'risk_level': row[14],
+					'breaking_changes': bool(row[15]),
+					'security_relevant': bool(row[16]),
+					'performance_impact': row[17]
+				}
+			}
+			commits.append(commit_data)
+		
+		return commits
+
+	async def get_repository_change_summary(
+		self, 
+		repo_name: str, 
+		hours: int = 24
+	) -> Dict[str, Any]:
+		"""
+		Get comprehensive change summary for a repository.
+		
+		Args:
+			repo_name: Repository name
+			hours: Hours to look back
+			
+		Returns:
+			Repository change summary
+		"""
+		cutoff_time = datetime.now(timezone.utc) - timedelta(hours=hours)
+		
+		async with self._get_db_connection() as db:
+			# Get commit statistics
+			stats_query = """
+			SELECT 
+				COUNT(*) as total_commits,
+				COUNT(DISTINCT author_login) as unique_authors,
+				COUNT(DISTINCT branch_name) as branches_active,
+				SUM(stats_additions) as total_additions,
+				SUM(stats_deletions) as total_deletions,
+				SUM(files_changed) as total_files_changed,
+				AVG(stats_total_changes) as avg_commit_size
+			FROM commits
+			WHERE repo_name = ? AND commit_date >= ?
+			"""
+			
+			cursor = await db.execute(stats_query, (repo_name, cutoff_time.isoformat()))
+			stats_row = await cursor.fetchone()
+			
+			# Get summary statistics
+			summary_query = """
+			SELECT 
+				COUNT(CASE WHEN breaking_changes = 1 THEN 1 END) as breaking_changes,
+				COUNT(CASE WHEN security_relevant = 1 THEN 1 END) as security_commits,
+				COUNT(CASE WHEN impact_score >= 70 THEN 1 END) as high_impact_commits,
+				AVG(impact_score) as avg_impact_score
+			FROM commit_summaries cs
+			JOIN commits c ON cs.commit_sha = c.sha
+			WHERE c.repo_name = ? AND c.commit_date >= ?
+			"""
+			
+			cursor = await db.execute(summary_query, (repo_name, cutoff_time.isoformat()))
+			summary_row = await cursor.fetchone()
+			
+			# Get category breakdown
+			categories_query = """
+			SELECT change_categories
+			FROM commit_summaries cs
+			JOIN commits c ON cs.commit_sha = c.sha
+			WHERE c.repo_name = ? AND c.commit_date >= ?
+			"""
+			
+			cursor = await db.execute(categories_query, (repo_name, cutoff_time.isoformat()))
+			category_rows = await cursor.fetchall()
+		
+		# Process category data
+		all_categories = []
+		for row in category_rows:
+			if row[0]:
+				try:
+					categories = json.loads(row[0])
+					all_categories.extend(categories)
+				except json.JSONDecodeError:
+					continue
+		
+		category_counts = {}
+		for category in all_categories:
+			category_counts[category] = category_counts.get(category, 0) + 1
+		
+		return {
+			'repo_name': repo_name,
+			'analysis_period_hours': hours,
+			'statistics': {
+				'total_commits': stats_row[0] if stats_row else 0,
+				'unique_authors': stats_row[1] if stats_row else 0,
+				'branches_active': stats_row[2] if stats_row else 0,
+				'total_additions': stats_row[3] if stats_row else 0,
+				'total_deletions': stats_row[4] if stats_row else 0,
+				'total_files_changed': stats_row[5] if stats_row else 0,
+				'avg_commit_size': round(stats_row[6], 2) if stats_row and stats_row[6] else 0
+			},
+			'quality_metrics': {
+				'breaking_changes_count': summary_row[0] if summary_row else 0,
+				'security_commits_count': summary_row[1] if summary_row else 0,
+				'high_impact_commits_count': summary_row[2] if summary_row else 0,
+				'avg_impact_score': round(summary_row[3], 2) if summary_row and summary_row[3] else 0
+			},
+			'change_categories': category_counts,
+			'timestamp': datetime.now(timezone.utc).isoformat()
+		}
 
 	# -------------------------
 	# EventDict functionality

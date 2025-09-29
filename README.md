@@ -1,6 +1,6 @@
 # GitHub Events Monitor
 
-A comprehensive Python-based service that monitors **23 different GitHub event types**, provides advanced repository analytics, and offers extensive monitoring capabilities. Features include repository health scoring, developer productivity analysis, security monitoring, anomaly detection, and community engagement metrics.
+A comprehensive Python-based service that monitors **23 different GitHub event types**, provides advanced repository analytics, and offers extensive monitoring capabilities. Features include repository health scoring, developer productivity analysis, security monitoring, anomaly detection, community engagement metrics, and **detailed commit change tracking with automated summaries**.
 
 ## Architecture (C4 L1)
 
@@ -1238,6 +1238,16 @@ flowchart TB
 - **Release/Deployment**: `GET /metrics/release-deployment?repo=owner/repo&hours=720`
 - **Community Engagement**: `GET /metrics/community-engagement?repo=owner/repo&hours=168`
 - **Event Types Summary**: `GET /metrics/event-types-summary?repo=owner/repo&hours=168`
+
+#### Commit Monitoring & Change Tracking
+- **Recent Commits**: `GET /commits/recent?repo=owner/repo&hours=24&limit=50`
+- **Change Summary**: `GET /commits/summary?repo=owner/repo&hours=168`
+- **Commit Details**: `GET /commits/{sha}?repo=owner/repo`
+- **Commit Files**: `GET /commits/{sha}/files?repo=owner/repo`
+- **Multi-Repo Monitoring**: `GET /monitoring/commits?repos=repo1,repo2&hours=24`
+- **Commits by Category**: `GET /monitoring/commits/categories?repo=owner/repo`
+- **Commits by Author**: `GET /monitoring/commits/authors?repo=owner/repo&hours=168`
+- **High-Impact Commits**: `GET /monitoring/commits/impact?repo=owner/repo&min_impact_score=70`
 
 #### Visualization & Docs
 - **Trending Chart**: `GET /visualization/trending-chart?hours=24&limit=5&format=png`
