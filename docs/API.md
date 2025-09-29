@@ -124,6 +124,47 @@ Returns repositories with the most activity in a specified time window.
 
 ```http
 GET /metrics/trending?hours={hours}&limit={limit}
+
+### New Monitoring Use Cases
+
+The API now exposes additional metrics derived from more GitHub event types (PushEvent, ReleaseEvent, IssueCommentEvent, PullRequestReviewEvent, PullRequestReviewCommentEvent, ForkEvent, CreateEvent, DeleteEvent):
+
+- `GET /metrics/stars?hours={hours}&repo={owner}/{repo}`
+  - Returns star count (WatchEvent) in the last N hours; `repo` optional for global.
+  - Example:
+    ```bash
+    curl "http://localhost:8000/metrics/stars?hours=24&repo=microsoft/vscode"
+    ```
+
+- `GET /metrics/releases?hours={hours}&repo={owner}/{repo}`
+  - Returns number of published releases (ReleaseEvent with action=published) in last N hours.
+  - Example:
+    ```bash
+    curl "http://localhost:8000/metrics/releases?hours=168&repo=hashicorp/terraform"
+    ```
+
+- `GET /metrics/push-activity?hours={hours}&repo={owner}/{repo}`
+  - Returns push activity stats: `{ push_events, total_commits }` over last N hours.
+  - Example:
+    ```bash
+    curl "http://localhost:8000/metrics/push-activity?hours=24&repo=vercel/next.js"
+    ```
+
+- `GET /metrics/pr-merge-time?repo={owner}/{repo}&hours={hours}`
+  - Average PR merge time for PRs opened in last N hours and later merged.
+  - Response includes: `avg_seconds`, `p50`, `p90`, and `count`.
+  - Example:
+    ```bash
+    curl "http://localhost:8000/metrics/pr-merge-time?repo=facebook/react&hours=336"
+    ```
+
+- `GET /metrics/issue-first-response?repo={owner}/{repo}&hours={hours}`
+  - Average time to first comment on issues opened in last N hours.
+  - Response includes: `avg_seconds`, `p50`, `p90`, and `count`.
+  - Example:
+    ```bash
+    curl "http://localhost:8000/metrics/issue-first-response?repo=pallets/flask&hours=336"
+    ```
 ```
 
 **Parameters:**

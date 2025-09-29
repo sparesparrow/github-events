@@ -76,3 +76,52 @@ async def collect_now(
 ) -> dict:
     inserted = await svc.collect_now(limit=limit)
     return {"inserted": inserted}
+
+
+# ------------------------------
+# Extended monitoring endpoints
+# ------------------------------
+
+@router.get("/metrics/stars")
+async def metrics_stars(
+    hours: int = 24,
+    repo: Optional[str] = None,
+    svc: GitHubEventsQueryService = Depends(get_query_service),
+) -> dict:
+    return await svc.get_stars(hours=hours, repo=repo)
+
+
+@router.get("/metrics/releases")
+async def metrics_releases(
+    hours: int = 24,
+    repo: Optional[str] = None,
+    svc: GitHubEventsQueryService = Depends(get_query_service),
+) -> dict:
+    return await svc.get_releases(hours=hours, repo=repo)
+
+
+@router.get("/metrics/push-activity")
+async def metrics_push_activity(
+    hours: int = 24,
+    repo: Optional[str] = None,
+    svc: GitHubEventsQueryService = Depends(get_query_service),
+) -> dict:
+    return await svc.get_push_activity(hours=hours, repo=repo)
+
+
+@router.get("/metrics/pr-merge-time")
+async def metrics_pr_merge_time(
+    repo: str,
+    hours: int = 168,
+    svc: GitHubEventsQueryService = Depends(get_query_service),
+) -> dict:
+    return await svc.get_pr_merge_time(repo=repo, hours=hours)
+
+
+@router.get("/metrics/issue-first-response")
+async def metrics_issue_first_response(
+    repo: str,
+    hours: int = 168,
+    svc: GitHubEventsQueryService = Depends(get_query_service),
+) -> dict:
+    return await svc.get_issue_first_response(repo=repo, hours=hours)
