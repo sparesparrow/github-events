@@ -1,6 +1,6 @@
 # GitHub Events Monitor
 
-A comprehensive Python-based service that monitors **23 different GitHub event types**, provides advanced repository analytics, and offers extensive monitoring capabilities. Features include repository health scoring, developer productivity analysis, security monitoring, anomaly detection, community engagement metrics, and **detailed commit change tracking with automated summaries**.
+A comprehensive Python-based service that monitors **23 different GitHub event types**, provides advanced repository analytics, and offers extensive monitoring capabilities. Features include repository health scoring, developer productivity analysis, security monitoring, anomaly detection, community engagement metrics, detailed commit change tracking with automated summaries, and **flexible database backends (SQLite & AWS DynamoDB) with SOLID architecture**.
 
 ## Architecture (C4 L1)
 
@@ -30,10 +30,23 @@ graph LR
 
 The service can be configured via environment variables:
 
+### Core Configuration
 - `TARGET_REPOSITORIES`: Comma-separated list of repositories to monitor (e.g., "owner/repo1,owner/repo2")
 - `GITHUB_TOKEN`: GitHub personal access token for higher API rate limits
-- `DATABASE_PATH`: Path to SQLite database file
 - `POLL_INTERVAL`: Polling interval in seconds (default: 300)
+
+### Database Configuration
+- `DATABASE_PROVIDER`: Database backend - "sqlite" or "dynamodb" (default: sqlite)
+
+#### SQLite Configuration (DATABASE_PROVIDER=sqlite)
+- `DATABASE_PATH`: Path to SQLite database file (default: ./github_events.db)
+
+#### DynamoDB Configuration (DATABASE_PROVIDER=dynamodb)
+- `AWS_REGION`: AWS region (default: us-east-1)
+- `DYNAMODB_TABLE_PREFIX`: Table name prefix (default: github-events-)
+- `DYNAMODB_ENDPOINT_URL`: Custom endpoint for local DynamoDB
+- `AWS_ACCESS_KEY_ID`: AWS access key (optional if using IAM roles)
+- `AWS_SECRET_ACCESS_KEY`: AWS secret key (optional if using IAM roles)
 
 ## 🚀 Quick Start - Live Dashboard
 
@@ -56,14 +69,26 @@ source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
-2) **Start API Server**
+2) **Choose Database Provider**
+```bash
+# Option A: SQLite (default, for development)
+export DATABASE_PROVIDER=sqlite
+export DATABASE_PATH=./github_events.db
+
+# Option B: DynamoDB (for production scale)
+export DATABASE_PROVIDER=dynamodb
+export AWS_REGION=us-west-2
+python scripts/setup_dynamodb.py create
+```
+
+3) **Start API Server**
 ```bash
 export GITHUB_TOKEN="your_github_token"  # optional, for higher rate limits
 export CORS_ORIGINS="*"  # enable CORS for dashboard
-python -m src.github_events_monitor.api
+python -m src.github_events_monitor.enhanced_api
 ```
 
-3) **Open Live Dashboard**
+4) **Open Live Dashboard**
 - Open `docs/index.html` in your browser
 - Dashboard automatically connects to `http://localhost:8000`
 - **Real-time data** refreshes every 30 seconds
