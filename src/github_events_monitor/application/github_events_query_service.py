@@ -379,62 +379,6 @@ class GitHubEventsQueryService:
             
             return commits
 
-    # Enhanced monitoring methods - delegate to collector for now
-    async def get_repository_health_score(self, repo: str, hours: int = 168) -> Dict[str, Any]:
-        """Get repository health score - delegates to collector for implementation"""
-        from src.github_events_monitor.event_collector import GitHubEventsCollector
-        from src.github_events_monitor.database import DatabaseManager
-        
-        # Create collector instance to access enhanced monitoring methods
-        db_manager = DatabaseManager(db_path=self.repository.db_connection.db_path)
-        collector = GitHubEventsCollector(db_manager=db_manager)
-        return await collector.get_repository_health_score(repo, hours)
-
-    async def get_developer_productivity_metrics(self, repo: str, hours: int = 168) -> List[Dict[str, Any]]:
-        """Get developer productivity metrics"""
-        from src.github_events_monitor.event_collector import GitHubEventsCollector
-        from src.github_events_monitor.database import DatabaseManager
-        
-        db_manager = DatabaseManager(db_path=self.repository.db_connection.db_path)
-        collector = GitHubEventsCollector(db_manager=db_manager)
-        return await collector.get_developer_productivity_metrics(repo, hours)
-
-    async def get_security_monitoring_report(self, repo: str, hours: int = 168) -> Dict[str, Any]:
-        """Get security monitoring report"""
-        from src.github_events_monitor.event_collector import GitHubEventsCollector
-        from src.github_events_monitor.database import DatabaseManager
-        
-        db_manager = DatabaseManager(db_path=self.repository.db_connection.db_path)
-        collector = GitHubEventsCollector(db_manager=db_manager)
-        return await collector.get_security_monitoring_report(repo, hours)
-
-    async def detect_event_anomalies(self, repo: str, hours: int = 168) -> List[Dict[str, Any]]:
-        """Detect event anomalies"""
-        from src.github_events_monitor.event_collector import GitHubEventsCollector
-        from src.github_events_monitor.database import DatabaseManager
-        
-        db_manager = DatabaseManager(db_path=self.repository.db_connection.db_path)
-        collector = GitHubEventsCollector(db_manager=db_manager)
-        return await collector.detect_event_anomalies(repo, hours)
-
-    async def get_release_deployment_metrics(self, repo: str, hours: int = 720) -> Dict[str, Any]:
-        """Get release and deployment metrics"""
-        from src.github_events_monitor.event_collector import GitHubEventsCollector
-        from src.github_events_monitor.database import DatabaseManager
-        
-        db_manager = DatabaseManager(db_path=self.repository.db_connection.db_path)
-        collector = GitHubEventsCollector(db_manager=db_manager)
-        return await collector.get_release_deployment_metrics(repo, hours)
-
-    async def get_community_engagement_metrics(self, repo: str, hours: int = 168) -> Dict[str, Any]:
-        """Get community engagement metrics"""
-        from src.github_events_monitor.event_collector import GitHubEventsCollector
-        from src.github_events_monitor.database import DatabaseManager
-        
-        db_manager = DatabaseManager(db_path=self.repository.db_connection.db_path)
-        collector = GitHubEventsCollector(db_manager=db_manager)
-        return await collector.get_community_engagement_metrics(repo, hours)
-
 
 def _percentile(values: List[int], p: int) -> float:
     if not values:
