@@ -19,6 +19,15 @@
         ],
         "description": "GitHub Events Monitor MCP Server via Docker container with persistent storage"
       },
+      "github-events-monitor": {
+        "command": "github-events-monitor-mcp", 
+        "args": [],
+        "env": {
+          "GITHUB_TOKEN": "${{GITHUB_TOKEN}}",
+          "MCP_TRANSPORT": "stdio"
+        },
+        "description": "GitHub Events Monitor MCP Server (direct execution)"
+      },
       "postgres": {
         "command": "npx",
         "args": [
