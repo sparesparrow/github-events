@@ -1321,6 +1321,83 @@ docker-compose up -d
 
 See `docs/DEPLOYMENT.md` for detailed Docker deployment instructions.
 
+## ☁️ AWS Deployment Options
+
+The GitHub Events Monitor can be deployed to AWS using multiple strategies:
+
+### Option A: AWS Elastic Beanstalk (Docker)
+
+1. **Build and push image to ECR**:
+```bash
+AWS_ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+REGION=us-east-1
+REPO=github-events-monitor
+aws ecr create-repository --repository-name $REPO || true
+aws ecr get-login-password --region $REGION | docker login --username AWS --password-stdin $AWS_ACCOUNT_ID.dkr.ecr.$REGION.amazonaws.com
+docker build -t $REPO .
+docker tag $REPO:latest $AWS_ACCOUNT_ID.dkr.ecr.$REGION.amazonaws.com/$REPO:latest
+docker push $AWS_ACCOUNT_ID.dkr.ecr.$REGION.amazonaws.com/$REPO:latest
+```
+
+2. **Create Elastic Beanstalk application**:
+```bash
+eb init -p docker github-events-monitor --region $REGION
+eb create github-events-env
+eb setenv GITHUB_TOKEN=your_token DATABASE_PATH=/data/github_events.db
+eb deploy
+```
+
+### Option B: AWS ECS Fargate
+
+1. **Create ECS task definition** using the ECR image:
+```json
+{
+  "containerDefinitions": [
+    {
+      "name": "github-events-api",
+      "image": "${AWS_ACCOUNT_ID}.dkr.ecr.${REGION}.amazonaws.com/github-events-monitor:latest",
+      "portMappings": [{"containerPort": 8000, "hostPort": 8000}],
+      "environment": [
+        {"name": "GITHUB_TOKEN", "value": "your_token"},
+        {"name": "DATABASE_PROVIDER", "value": "dynamodb"},
+        {"name": "AWS_REGION", "value": "us-east-1"}
+      ]
+    }
+  ]
+}
+```
+
+2. **Expose via Application Load Balancer** targeting port 8000
+
+### Option C: AWS Lambda + API Gateway
+
+Use container-based Lambda with FastAPI using `mangum` adapter:
+
+```python
+# lambda_function.py
+from mangum import Mangum
+from src.github_events_monitor.api import app
+
+handler = Mangum(app, lifespan="off")
+```
+
+### Option D: DynamoDB Backend Deployment
+
+For scalable production deployment with DynamoDB:
+
+```bash
+# Configure DynamoDB backend
+export DATABASE_PROVIDER=dynamodb
+export AWS_REGION=us-east-1
+export DYNAMODB_TABLE_PREFIX=prod-github-events-
+
+# Create DynamoDB tables
+python scripts/setup_dynamodb.py create
+
+# Start with DynamoDB backend
+python -m src.github_events_monitor.api
+```
+
 ### MCP Postgres (read-only) integration
 
 Connect a read-only PostgreSQL database via the MCP Postgres server to inspect schemas and run queries through your MCP client.
