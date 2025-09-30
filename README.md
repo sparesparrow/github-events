@@ -1420,14 +1420,20 @@ Security:
 
 ## Documentation
 
-Comprehensive documentation is available in the `docs/` directory:
+Comprehensive documentation is available in the `docs/` directory. See **[docs/README.md](docs/README.md)** for the complete documentation index.
 
-- **API.md**: REST API reference and endpoints
-- **ARCHITECTURE.md**: System architecture and design decisions
-- **ASSIGNMENT.md**: Project requirements and specifications
-- **DEPLOYMENT.md**: Deployment guides and configurations
-- **WORKFLOWS.md**: CI/CD workflow documentation
-- **diagram.md**: System architecture diagrams
+### **Quick Reference**
+- **[CHANGELOG.md](CHANGELOG.md)** - Complete version history and feature timeline
+- **[docs/API.md](docs/API.md)** - REST API reference with 25+ endpoints
+- **[docs/ENHANCED_MONITORING.md](docs/ENHANCED_MONITORING.md)** - 6 comprehensive monitoring use cases
+- **[docs/DATABASE_ABSTRACTION.md](docs/DATABASE_ABSTRACTION.md)** - SOLID architecture with SQLite/DynamoDB
+- **[docs/AGENT_ECOSYSTEM.md](docs/AGENT_ECOSYSTEM.md)** - Claude Agent SDK integration
+- **[docs/DOCKER_USAGE.md](docs/DOCKER_USAGE.md)** - Comprehensive Docker deployment guide
+
+### **Specialized Guides**
+- **[docs/COMMIT_MONITORING.md](docs/COMMIT_MONITORING.md)** - Detailed commit tracking and analysis
+- **[docs/DYNAMODB_SETUP.md](docs/DYNAMODB_SETUP.md)** - AWS DynamoDB configuration
+- **[docs/OPENSSL_REFACTORING_MONITOR.md](docs/OPENSSL_REFACTORING_MONITOR.md)** - DevOps process monitoring
 
 ## Assumptions
 
