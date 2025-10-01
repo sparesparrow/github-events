@@ -16,7 +16,8 @@ from typing import List, Dict, Any
 import httpx
 import aiosqlite
 
-from github_events_monitor.collector import GitHubEventsCollector, GitHubEvent
+from src.github_events_monitor.event_collector import GitHubEventsCollector
+from src.github_events_monitor.event import GitHubEvent
 
 
 class TestGitHubEvent:

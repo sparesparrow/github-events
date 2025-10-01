@@ -16,8 +16,9 @@ from unittest.mock import Mock, patch
 import httpx
 from fastapi.testclient import TestClient
 
-from github_events_monitor.collector import GitHubEventsCollector, GitHubEvent
-from github_events_monitor.api import app
+from src.github_events_monitor.event_collector import GitHubEventsCollector
+from src.github_events_monitor.event import GitHubEvent
+from src.github_events_monitor.api import app
 
 
 class TestEndToEndWorkflow:

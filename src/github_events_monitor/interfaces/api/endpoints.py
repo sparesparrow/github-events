@@ -8,14 +8,22 @@ from src.github_events_monitor.application.github_events_command_service import 
 
 router = APIRouter()
 
+# These will be set by the API module during wiring
+_query_service_instance: Optional[GitHubEventsQueryService] = None
+_command_service_instance: Optional[GitHubEventsCommandService] = None
+
 
 def get_query_service() -> GitHubEventsQueryService:
     # This function will be overridden in app wiring to inject the singleton
-    raise HTTPException(status_code=500, detail="Query service not wired")
+    if _query_service_instance is None:
+        raise HTTPException(status_code=500, detail="Query service not wired")
+    return _query_service_instance
 
 
 def get_command_service() -> GitHubEventsCommandService:
-    raise HTTPException(status_code=500, detail="Command service not wired")
+    if _command_service_instance is None:
+        raise HTTPException(status_code=500, detail="Command service not wired")
+    return _command_service_instance
 
 
 @router.get("/health")

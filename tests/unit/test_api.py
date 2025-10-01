@@ -15,9 +15,12 @@ from fastapi.testclient import TestClient
 from fastapi import status
 import httpx
 
-from github_events_monitor.api import app, collector_instance
-from github_events_monitor.collector import GitHubEventsCollector, GitHubEvent
-from github_events_monitor.services import MetricsService, VisualizationService, EventsRepository, HealthReporter
+from src.github_events_monitor.api import app
+from src.github_events_monitor.event_collector import GitHubEventsCollector
+from src.github_events_monitor.event import GitHubEvent
+from src.github_events_monitor.application.github_events_query_service import GitHubEventsQueryService
+from src.github_events_monitor.application.github_events_command_service import GitHubEventsCommandService
+from src.github_events_monitor.infrastructure.events_repository import EventsRepository
 
 
 class TestAPI:
