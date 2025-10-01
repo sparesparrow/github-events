@@ -1,23 +1,75 @@
-venv/
+# Python
 __pycache__/
+*.py[cod]
+*.pyo
+*.pyd
 *.pyc
-.env
-.DS_Store
-.eggs/
+*.pkl
 *.egg-info/
+*.egg
+*.log
+
+# Environments
+.env
+.venv/
+venv/
+ENV/
+env/
+*.env
+
+# IDEs and editors
+.vscode/
+.idea/
+*.sublime-workspace
+*.sublime-project
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Test/coverage
+.coverage
+htmlcov/
+.tox/
+.cache/
+pytest_cache/
+.nox/
+
+# Build artifacts
 build/
 dist/
-.venv/
+*.egg-info/
+.eggs/
+pip-wheel-metadata/
+*.manifest
+
+# Database/data
+*.db
+*.sqlite3
+data/
+*.sqlite
+*.db-journal
+
+# Docker
+*.pid
+*.sock
 server.log
 server.pid
+
+# GitHub Events Monitor specific
 pages_content/
 logs/*
-*.db
-*.db-journal
-*.sqlite
-# Local runtime exports
 pages_demo.db
 .envrc
 # Keep DB tracked for demo; comment out next line to stop tracking
 # database/events.db
+
+# Node (if any frontend)
 node_modules/
+npm-debug.log
+yarn-error.log
+
+# Misc
+*.bak
+*.swp
+*.tmp

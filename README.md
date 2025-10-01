@@ -1,6 +1,6 @@
 # GitHub Events Monitor
 
-A Python-based service that monitors GitHub Events (WatchEvent, PullRequestEvent, IssuesEvent), stores them in SQLite, exposes data through an MCP server (each tool = API endpoint), and publishes interactive visualizations to a GitHub Pages site from the docs/ folder.
+A comprehensive Python-based service that monitors **23 different GitHub event types** and provides advanced repository analytics. Features include repository health scoring, developer productivity analysis, security monitoring, anomaly detection, community engagement metrics, and detailed commit tracking with automated summaries. Supports both SQLite and AWS DynamoDB backends.
 
 ## Architecture (C4 L1)
 
@@ -16,21 +16,37 @@ graph LR
 
 ## Components
 
-- Event Monitor: Polls GitHub API events, filters target types, stores to SQLite, computes PR metrics.
-  - Can monitor specific repositories via `TARGET_REPOSITORIES` environment variable
-  - Falls back to public events if no target repositories specified
-- MCP Server: Tools to retrieve metrics/data directly from the DB.
-- Data Exporter: Builds docs/data.json and Plotly HTML charts in docs/.
-- GitHub Pages: Static dashboard served from docs/.
+- **Enhanced Event Monitor**: Monitors 23+ GitHub event types including development, collaboration, security, and deployment events
+  - Comprehensive event filtering and processing
+  - Advanced metrics calculation and health scoring
+  - Anomaly detection and pattern analysis
+- **Advanced Analytics Engine**: Repository health, developer productivity, security monitoring, and community engagement analysis
+- **MCP Server**: Enhanced tools for AI integration with comprehensive monitoring capabilities
+- **REST API**: 15+ endpoints for metrics, analytics, and monitoring
+- **Data Exporter**: Builds docs/data.json and interactive visualizations
+- **GitHub Pages**: Static dashboard with live API integration
 
 ## Configuration
 
 The service can be configured via environment variables:
 
+### Core Configuration
 - `TARGET_REPOSITORIES`: Comma-separated list of repositories to monitor (e.g., "owner/repo1,owner/repo2")
 - `GITHUB_TOKEN`: GitHub personal access token for higher API rate limits
-- `DATABASE_PATH`: Path to SQLite database file
 - `POLL_INTERVAL`: Polling interval in seconds (default: 300)
+
+### Database Configuration
+- `DATABASE_PROVIDER`: Database backend - "sqlite" or "dynamodb" (default: sqlite)
+
+#### SQLite Configuration (DATABASE_PROVIDER=sqlite)
+- `DATABASE_PATH`: Path to SQLite database file (default: ./github_events.db)
+
+#### DynamoDB Configuration (DATABASE_PROVIDER=dynamodb)
+- `AWS_REGION`: AWS region (default: us-east-1)
+- `DYNAMODB_TABLE_PREFIX`: Table name prefix (default: github-events-)
+- `DYNAMODB_ENDPOINT_URL`: Custom endpoint for local DynamoDB
+- `AWS_ACCESS_KEY_ID`: AWS access key (optional if using IAM roles)
+- `AWS_SECRET_ACCESS_KEY`: AWS secret key (optional if using IAM roles)
 
 ## 🚀 Quick Start - Live Dashboard
 
@@ -53,14 +69,26 @@ source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
-2) **Start API Server**
+2) **Choose Database Provider**
+```bash
+# Option A: SQLite (default, for development)
+export DATABASE_PROVIDER=sqlite
+export DATABASE_PATH=./github_events.db
+
+# Option B: DynamoDB (for production scale)
+export DATABASE_PROVIDER=dynamodb
+export AWS_REGION=us-west-2
+python scripts/setup_dynamodb.py create
+```
+
+3) **Start API Server**
 ```bash
 export GITHUB_TOKEN="your_github_token"  # optional, for higher rate limits
 export CORS_ORIGINS="*"  # enable CORS for dashboard
-python -m src.github_events_monitor.api
+python -m src.github_events_monitor.enhanced_api
 ```
 
-3) **Open Live Dashboard**
+4) **Open Live Dashboard**
 - Open `docs/index.html` in your browser
 - Dashboard automatically connects to `http://localhost:8000`
 - **Real-time data** refreshes every 30 seconds
@@ -1219,12 +1247,35 @@ flowchart TB
 ```
 
 ### 🌐 API Endpoints
+
+#### Core Metrics
 - **Health**: `GET /health`
 - **Event Counts**: `GET /metrics/event-counts?offset_minutes=60`
 - **PR Intervals**: `GET /metrics/pr-interval?repo=owner/repo`
 - **Repository Activity**: `GET /metrics/repository-activity?repo=owner/repo&hours=24`
 - **Trending Repos**: `GET /metrics/trending?hours=24&limit=10`
-- **Visualization**: `GET /visualization/trending-chart?hours=24&limit=5&format=png`
+
+#### Enhanced Monitoring
+- **Repository Health**: `GET /metrics/repository-health?repo=owner/repo&hours=168`
+- **Developer Productivity**: `GET /metrics/developer-productivity?repo=owner/repo&hours=168`
+- **Security Monitoring**: `GET /metrics/security-monitoring?repo=owner/repo&hours=168`
+- **Event Anomalies**: `GET /metrics/event-anomalies?repo=owner/repo&hours=168`
+- **Release/Deployment**: `GET /metrics/release-deployment?repo=owner/repo&hours=720`
+- **Community Engagement**: `GET /metrics/community-engagement?repo=owner/repo&hours=168`
+- **Event Types Summary**: `GET /metrics/event-types-summary?repo=owner/repo&hours=168`
+
+#### Commit Monitoring & Change Tracking
+- **Recent Commits**: `GET /commits/recent?repo=owner/repo&hours=24&limit=50`
+- **Change Summary**: `GET /commits/summary?repo=owner/repo&hours=168`
+- **Commit Details**: `GET /commits/{sha}?repo=owner/repo`
+- **Commit Files**: `GET /commits/{sha}/files?repo=owner/repo`
+- **Multi-Repo Monitoring**: `GET /monitoring/commits?repos=repo1,repo2&hours=24`
+- **Commits by Category**: `GET /monitoring/commits/categories?repo=owner/repo`
+- **Commits by Author**: `GET /monitoring/commits/authors?repo=owner/repo&hours=168`
+- **High-Impact Commits**: `GET /monitoring/commits/impact?repo=owner/repo&min_impact_score=70`
+
+#### Visualization & Docs
+- **Trending Chart**: `GET /visualization/trending-chart?hours=24&limit=5&format=png`
 - **Interactive API Docs**: `http://localhost:8000/docs`
 
 ### 📈 Live Dashboard URLs
@@ -1270,6 +1321,25 @@ docker-compose up -d
 
 See `docs/DEPLOYMENT.md` for detailed Docker deployment instructions.
 
+## ☁️ AWS DynamoDB Backend
+
+For scalable production deployment, the system supports AWS DynamoDB:
+
+```bash
+# Configure DynamoDB backend
+export DATABASE_PROVIDER=dynamodb
+export AWS_REGION=us-east-1
+export DYNAMODB_TABLE_PREFIX=github-events-
+
+# Create DynamoDB tables
+python scripts/setup_dynamodb.py create
+
+# Start with DynamoDB backend
+python -m src.github_events_monitor.api
+```
+
+See [docs/DYNAMODB_SETUP.md](docs/DYNAMODB_SETUP.md) for detailed configuration.
+
 ### MCP Postgres (read-only) integration
 
 Connect a read-only PostgreSQL database via the MCP Postgres server to inspect schemas and run queries through your MCP client.
@@ -1292,14 +1362,20 @@ Security:
 
 ## Documentation
 
-Comprehensive documentation is available in the `docs/` directory:
+Comprehensive documentation is available in the `docs/` directory. See **[docs/README.md](docs/README.md)** for the complete documentation index.
 
-- **API.md**: REST API reference and endpoints
-- **ARCHITECTURE.md**: System architecture and design decisions
-- **ASSIGNMENT.md**: Project requirements and specifications
-- **DEPLOYMENT.md**: Deployment guides and configurations
-- **WORKFLOWS.md**: CI/CD workflow documentation
-- **diagram.md**: System architecture diagrams
+### **Quick Reference**
+- **[CHANGELOG.md](CHANGELOG.md)** - Complete version history and feature timeline
+- **[docs/API.md](docs/API.md)** - REST API reference with 25+ endpoints
+- **[docs/ENHANCED_MONITORING.md](docs/ENHANCED_MONITORING.md)** - 6 comprehensive monitoring use cases
+- **[docs/DATABASE_ABSTRACTION.md](docs/DATABASE_ABSTRACTION.md)** - SOLID architecture with SQLite/DynamoDB
+- **[docs/AGENT_ECOSYSTEM.md](docs/AGENT_ECOSYSTEM.md)** - Claude Agent SDK integration
+- **[docs/DOCKER_USAGE.md](docs/DOCKER_USAGE.md)** - Comprehensive Docker deployment guide
+
+### **Specialized Guides**
+- **[docs/COMMIT_MONITORING.md](docs/COMMIT_MONITORING.md)** - Detailed commit tracking and analysis
+- **[docs/DYNAMODB_SETUP.md](docs/DYNAMODB_SETUP.md)** - AWS DynamoDB configuration
+- **[docs/OPENSSL_REFACTORING_MONITOR.md](docs/OPENSSL_REFACTORING_MONITOR.md)** - DevOps process monitoring
 
 ## Assumptions
 

@@ -20,6 +20,43 @@ The GitHub Events Monitor provides a comprehensive REST API for querying GitHub 
 
 The API currently does not require authentication as it only serves aggregated metrics from public GitHub data. The application uses a GitHub token internally for higher rate limits, but clients don't need to provide credentials.
 
+## Supported GitHub Events
+
+The GitHub Events Monitor now supports **23 different GitHub event types** for comprehensive repository monitoring:
+
+### Core Development Events
+- **WatchEvent** - Repository stars/watching
+- **PullRequestEvent** - Pull requests opened/closed/merged  
+- **IssuesEvent** - Issues opened/closed/labeled
+- **PushEvent** - Code pushes to repositories
+- **ForkEvent** - Repository forks
+- **CreateEvent** - Branch/tag creation
+- **DeleteEvent** - Branch/tag deletion
+- **ReleaseEvent** - Releases published
+
+### Collaboration Events
+- **CommitCommentEvent** - Comments on commits
+- **IssueCommentEvent** - Comments on issues
+- **PullRequestReviewEvent** - PR reviews
+- **PullRequestReviewCommentEvent** - Comments on PR reviews
+
+### Repository Management Events
+- **PublicEvent** - Repository made public
+- **MemberEvent** - Collaborators added/removed
+- **TeamAddEvent** - Teams added to repositories
+
+### Security and Maintenance Events
+- **GollumEvent** - Wiki pages created/updated
+- **DeploymentEvent** - Deployments created
+- **DeploymentStatusEvent** - Deployment status updates
+- **StatusEvent** - Commit status updates
+- **CheckRunEvent** - Check runs completed
+- **CheckSuiteEvent** - Check suites completed
+
+### GitHub-Specific Events
+- **SponsorshipEvent** - Sponsorship changes
+- **MarketplacePurchaseEvent** - Marketplace purchases
+
 ## Core Metrics Endpoints (Assignment Requirements)
 
 ### Get Event Counts by Type
@@ -86,6 +123,339 @@ GET /metrics/pr-interval?repo={owner}/{repo}
 # Get PR intervals for a specific repository
 curl "http://localhost:8000/metrics/pr-interval?repo=microsoft/vscode"
 ```
+
+## Enhanced Monitoring Endpoints
+
+### Get Repository Health Score
+
+Returns comprehensive repository health assessment based on multiple metrics.
+
+```http
+GET /metrics/repository-health?repo={owner}/{repo}&hours={hours}
+```
+
+**Parameters:**
+- `repo` (string, required): Repository in format "owner/repo"
+- `hours` (integer, optional): Time window in hours. Default: 168 (1 week)
+
+**Response:**
+```json
+{
+  "repo_name": "microsoft/vscode",
+  "analysis_period_hours": 168,
+  "total_events": 245,
+  "health_score": 87.5,
+  "activity_score": 92.0,
+  "collaboration_score": 85.0,
+  "maintenance_score": 88.0,
+  "security_score": 85.0,
+  "activity_breakdown": {
+    "PushEvent": 45,
+    "PullRequestEvent": 32,
+    "IssuesEvent": 18
+  },
+  "timestamp": "2025-08-21T19:46:37.550577+00:00"
+}
+```
+
+### Get Developer Productivity Metrics
+
+Analyzes individual developer contributions and productivity.
+
+```http
+GET /metrics/developer-productivity?repo={owner}/{repo}&hours={hours}
+```
+
+**Response:**
+```json
+{
+  "repo": "microsoft/vscode",
+  "hours": 168,
+  "developers": [
+    {
+      "actor_login": "developer1",
+      "total_events": 45,
+      "pushes": 12,
+      "prs_opened": 3,
+      "reviews_given": 8,
+      "productivity_score": 89.5,
+      "event_diversity": 83.3
+    }
+  ]
+}
+```
+
+### Get Security Monitoring Report
+
+Monitors security-related activities and provides risk assessment.
+
+```http
+GET /metrics/security-monitoring?repo={owner}/{repo}&hours={hours}
+```
+
+**Response:**
+```json
+{
+  "repo_name": "microsoft/vscode",
+  "security_score": 85.0,
+  "risk_level": "low",
+  "security_events": {
+    "CheckRunEvent": 45,
+    "StatusEvent": 67
+  },
+  "recommendations": [],
+  "timestamp": "2025-08-21T19:46:37.550577+00:00"
+}
+```
+
+### Detect Event Anomalies
+
+Detects unusual patterns in repository activity.
+
+```http
+GET /metrics/event-anomalies?repo={owner}/{repo}&hours={hours}
+```
+
+**Response:**
+```json
+{
+  "repo": "microsoft/vscode",
+  "hours": 168,
+  "anomalies": [
+    {
+      "type": "spike",
+      "event_type": "WatchEvent",
+      "severity": "high",
+      "description": "Unusual spike in WatchEvent activity",
+      "threshold": 15.2,
+      "actual_value": 45.0,
+      "confidence": 0.95
+    }
+  ]
+}
+```
+
+### Get Release and Deployment Metrics
+
+Tracks release and deployment patterns.
+
+```http
+GET /metrics/release-deployment?repo={owner}/{repo}&hours={hours}
+```
+
+**Parameters:**
+- `hours` (integer, optional): Default: 720 (30 days)
+
+**Response:**
+```json
+{
+  "repo_name": "microsoft/vscode",
+  "releases": {
+    "total_count": 8,
+    "frequency_per_week": 1.2
+  },
+  "deployments": {
+    "total_count": 24,
+    "success_rate": 91.7
+  },
+  "deployment_lead_time": 4.5
+}
+```
+
+### Get Community Engagement Metrics
+
+Analyzes community health and engagement.
+
+```http
+GET /metrics/community-engagement?repo={owner}/{repo}&hours={hours}
+```
+
+**Response:**
+```json
+{
+  "repo_name": "microsoft/vscode",
+  "total_contributors": 45,
+  "active_contributors": 23,
+  "community_health_score": 78.5,
+  "top_contributors": [
+    {
+      "actor_login": "contributor1",
+      "engagement_score": 45.0
+    }
+  ]
+}
+```
+
+### Get Event Types Summary
+
+Provides comprehensive overview of all monitored event types.
+
+```http
+GET /metrics/event-types-summary?repo={owner}/{repo}&hours={hours}
+```
+
+**Response:**
+```json
+{
+  "repo": "microsoft/vscode",
+  "total_monitored_events": 23,
+  "total_events": 245,
+  "event_types": {
+    "PushEvent": {
+      "count": 45,
+      "description": "Code pushes to repositories",
+      "category": "development"
+    }
+  },
+  "categories": {
+    "development": {
+      "count": 120,
+      "event_types": ["PushEvent", "PullRequestEvent"]
+    }
+  }
+}
+```
+
+## Commit Monitoring Endpoints
+
+### Get Recent Commits
+
+Returns recent commits for a repository with detailed summaries and analysis.
+
+```http
+GET /commits/recent?repo={owner}/{repo}&hours={hours}&limit={limit}
+```
+
+**Parameters:**
+- `repo` (string, required): Repository in format "owner/repo"
+- `hours` (integer, optional): Hours to look back. Default: 24
+- `limit` (integer, optional): Maximum commits to return. Default: 50
+
+**Response:**
+```json
+{
+  "repo": "microsoft/vscode",
+  "hours": 24,
+  "total_commits": 12,
+  "commits": [
+    {
+      "sha": "abc123...",
+      "author_name": "John Developer",
+      "author_login": "johndeveloper",
+      "message": "Fix memory leak in extension host",
+      "commit_date": "2025-01-15T10:30:00Z",
+      "branch_name": "main",
+      "stats": {
+        "additions": 15,
+        "deletions": 8,
+        "total_changes": 23
+      },
+      "files_changed": 3,
+      "summary": {
+        "short": "Fix memory leak in extension host",
+        "detailed": "Modified 3 files with 15 additions and 8 deletions. Categories: bugfix, performance",
+        "categories": ["bugfix", "performance"],
+        "impact_score": 45.2,
+        "risk_level": "medium",
+        "breaking_changes": false,
+        "security_relevant": false,
+        "performance_impact": "positive"
+      }
+    }
+  ]
+}
+```
+
+### Get Repository Change Summary
+
+Returns comprehensive change summary and statistics for a repository.
+
+```http
+GET /commits/summary?repo={owner}/{repo}&hours={hours}
+```
+
+**Response:**
+```json
+{
+  "repo_name": "microsoft/vscode",
+  "analysis_period_hours": 24,
+  "statistics": {
+    "total_commits": 12,
+    "unique_authors": 5,
+    "branches_active": 3,
+    "total_additions": 245,
+    "total_deletions": 89,
+    "avg_commit_size": 27.8
+  },
+  "quality_metrics": {
+    "breaking_changes_count": 0,
+    "security_commits_count": 1,
+    "high_impact_commits_count": 3,
+    "avg_impact_score": 42.5
+  },
+  "change_categories": {
+    "bugfix": 5,
+    "feature": 3,
+    "documentation": 2
+  }
+}
+```
+
+### Get Commit Details
+
+Returns detailed information about a specific commit.
+
+```http
+GET /commits/{commit_sha}?repo={owner}/{repo}
+```
+
+### Get Commit File Changes
+
+Returns file changes for a specific commit.
+
+```http
+GET /commits/{commit_sha}/files?repo={owner}/{repo}
+```
+
+### Monitor Multiple Repositories
+
+Monitor recent commits across multiple repositories.
+
+```http
+GET /monitoring/commits?repos={repo1},{repo2},{repo3}&hours={hours}&limit_per_repo={limit}
+```
+
+**Parameters:**
+- `repos` (string, required): Comma-separated list of repositories
+- `hours` (integer, optional): Hours to look back. Default: 24
+- `limit_per_repo` (integer, optional): Max commits per repository. Default: 10
+
+### Get Commits by Category
+
+Returns commits grouped by change categories (bugfix, feature, documentation, etc.).
+
+```http
+GET /monitoring/commits/categories?repo={owner}/{repo}&hours={hours}
+```
+
+### Get Commits by Author
+
+Returns commit statistics grouped by author.
+
+```http
+GET /monitoring/commits/authors?repo={owner}/{repo}&hours={hours}
+```
+
+### Get High-Impact Commits
+
+Returns commits with high impact scores.
+
+```http
+GET /monitoring/commits/impact?repo={owner}/{repo}&hours={hours}&min_impact_score={score}
+```
+
+**Parameters:**
+- `min_impact_score` (float, optional): Minimum impact score. Default: 70.0
 
 ## Additional Metrics Endpoints
 
@@ -397,6 +767,151 @@ Calculate average time between pull requests.
 What's the average time between PRs for facebook/react?
 ```
 
+#### get_repository_health_score
+
+Get comprehensive repository health assessment.
+
+**Parameters:**
+- `repo` (string, required): Repository name
+- `hours` (integer, optional): Time window
+
+**Example Usage:**
+```
+Assess the health of microsoft/vscode repository
+```
+
+#### get_developer_productivity_metrics
+
+Analyze developer productivity and contributions.
+
+**Parameters:**
+- `repo` (string, required): Repository name
+- `hours` (integer, optional): Time window
+
+**Example Usage:**
+```
+Show me the most productive developers in kubernetes/kubernetes
+```
+
+#### get_security_monitoring_report
+
+Generate security monitoring report.
+
+**Parameters:**
+- `repo` (string, required): Repository name
+- `hours` (integer, optional): Time window
+
+**Example Usage:**
+```
+Check security posture of tensorflow/tensorflow
+```
+
+#### detect_event_anomalies
+
+Detect unusual patterns in repository activity.
+
+**Parameters:**
+- `repo` (string, required): Repository name
+- `hours` (integer, optional): Time window
+
+**Example Usage:**
+```
+Find any unusual activity in golang/go repository
+```
+
+#### get_release_deployment_metrics
+
+Analyze release and deployment patterns.
+
+**Parameters:**
+- `repo` (string, required): Repository name
+- `hours` (integer, optional): Time window (default: 720)
+
+**Example Usage:**
+```
+Show deployment metrics for nodejs/node
+```
+
+#### get_community_engagement_metrics
+
+Analyze community health and engagement.
+
+**Parameters:**
+- `repo` (string, required): Repository name
+- `hours` (integer, optional): Time window
+
+**Example Usage:**
+```
+How healthy is the Python community engagement?
+```
+
+#### get_recent_commits
+
+Get recent commits for a repository with summaries.
+
+**Parameters:**
+- `repo` (string, required): Repository name
+- `hours` (integer, optional): Hours to look back
+- `limit` (integer, optional): Maximum commits to return
+
+**Example Usage:**
+```
+Show me recent commits for microsoft/vscode in the last 24 hours
+```
+
+#### get_repository_change_summary
+
+Get comprehensive change summary for a repository.
+
+**Parameters:**
+- `repo` (string, required): Repository name
+- `hours` (integer, optional): Hours to look back
+
+**Example Usage:**
+```
+Give me a change summary for kubernetes/kubernetes this week
+```
+
+#### get_commit_details
+
+Get detailed information about a specific commit.
+
+**Parameters:**
+- `commit_sha` (string, required): Commit SHA
+- `repo` (string, required): Repository name
+
+**Example Usage:**
+```
+Show me details for commit abc123def456 in tensorflow/tensorflow
+```
+
+#### monitor_multiple_repositories
+
+Monitor commits across multiple repositories.
+
+**Parameters:**
+- `repos` (string, required): Comma-separated repository list
+- `hours` (integer, optional): Hours to look back
+
+**Example Usage:**
+```
+Monitor commits in microsoft/vscode,facebook/react,nodejs/node for the last day
+```
+
+#### get_high_impact_commits
+
+Get high-impact commits for a repository.
+
+**Parameters:**
+- `repo` (string, required): Repository name
+- `hours` (integer, optional): Hours to look back
+- `min_impact_score` (float, optional): Minimum impact score
+
+**Example Usage:**
+```
+Find high-impact commits in golang/go this week
+```
+
 ### MCP Resources
 
 - `recent-events`: Access to recent event data
@@ -504,6 +1019,55 @@ curl "http://localhost:8000/visualization/trending-chart?format=png" \
 
 # Manual event collection
 curl -X POST http://localhost:8000/collect
+
+# Enhanced monitoring endpoints
+
+# Repository health assessment
+curl "http://localhost:8000/metrics/repository-health?repo=microsoft/vscode&hours=168"
+
+# Developer productivity analysis
+curl "http://localhost:8000/metrics/developer-productivity?repo=facebook/react&hours=720"
+
+# Security monitoring report
+curl "http://localhost:8000/metrics/security-monitoring?repo=kubernetes/kubernetes&hours=168"
+
+# Event anomaly detection
+curl "http://localhost:8000/metrics/event-anomalies?repo=tensorflow/tensorflow&hours=168"
+
+# Release and deployment metrics
+curl "http://localhost:8000/metrics/release-deployment?repo=nodejs/node&hours=2160"
+
+# Community engagement analysis
+curl "http://localhost:8000/metrics/community-engagement?repo=python/cpython&hours=168"
+
+# Complete event types overview
+curl "http://localhost:8000/metrics/event-types-summary?repo=golang/go&hours=168"
+
+# Commit monitoring endpoints
+
+# Recent commits with summaries
+curl "http://localhost:8000/commits/recent?repo=microsoft/vscode&hours=24&limit=20"
+
+# Repository change summary
+curl "http://localhost:8000/commits/summary?repo=kubernetes/kubernetes&hours=168"
+
+# Specific commit details
+curl "http://localhost:8000/commits/abc123def456?repo=tensorflow/tensorflow"
+
+# File changes for a commit
+curl "http://localhost:8000/commits/abc123def456/files?repo=nodejs/node"
+
+# Monitor multiple repositories
+curl "http://localhost:8000/monitoring/commits?repos=microsoft/vscode,facebook/react,nodejs/node&hours=24"
+
+# Commits by category
+curl "http://localhost:8000/monitoring/commits/categories?repo=golang/go&hours=168"
+
+# Commits by author
+curl "http://localhost:8000/monitoring/commits/authors?repo=python/cpython&hours=720"
+
+# High-impact commits
+curl "http://localhost:8000/monitoring/commits/impact?repo=kubernetes/kubernetes&hours=168&min_impact_score=80"
 ```
 
 ## WebSocket Support (Future Enhancement)

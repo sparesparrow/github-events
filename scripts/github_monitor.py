@@ -50,8 +50,41 @@ def fetch_events(etag: Optional[str]) -> Tuple[List[Dict], Optional[str], Option
     new_etag = r.headers.get("ETag")
 
     events = r.json()
-    # Filter to required event types
-    wanted = {"WatchEvent", "PullRequestEvent", "IssuesEvent"}
+    # Filter to required event types - expanded for comprehensive monitoring
+    wanted = {
+        # Core development events
+        'WatchEvent',           # Stars/watching repositories
+        'PullRequestEvent',     # Pull requests opened/closed/merged
+        'IssuesEvent',          # Issues opened/closed/labeled
+        'PushEvent',           # Code pushes to repositories
+        'ForkEvent',           # Repository forks
+        'CreateEvent',         # Branch/tag creation
+        'DeleteEvent',         # Branch/tag deletion
+        'ReleaseEvent',        # Releases published
+        
+        # Collaboration events
+        'CommitCommentEvent',  # Comments on commits
+        'IssueCommentEvent',   # Comments on issues
+        'PullRequestReviewEvent',      # PR reviews
+        'PullRequestReviewCommentEvent', # Comments on PR reviews
+        
+        # Repository management events
+        'PublicEvent',         # Repository made public
+        'MemberEvent',         # Collaborators added/removed
+        'TeamAddEvent',        # Teams added to repositories
+        
+        # Security and maintenance events
+        'GollumEvent',         # Wiki pages created/updated
+        'DeploymentEvent',     # Deployments created
+        'DeploymentStatusEvent', # Deployment status updates
+        'StatusEvent',         # Commit status updates
+        'CheckRunEvent',       # Check runs completed
+        'CheckSuiteEvent',     # Check suites completed
+        
+        # GitHub-specific events
+        'SponsorshipEvent',    # Sponsorship changes
+        'MarketplacePurchaseEvent', # Marketplace purchases
+    }
     filtered = [e for e in events if e.get("type") in wanted]
     log.info("Fetched %d relevant of %d total; poll interval: %ss", len(filtered), len(events), poll_interval)
     return filtered, new_etag or etag, poll_interval

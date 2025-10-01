@@ -5,7 +5,7 @@ Centralized configuration management with environment variable support.
 """
 
 import os
-from typing import Optional, List
+from typing import Optional, List, Dict, Any
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -15,8 +15,16 @@ class Config:
 	"""Application configuration"""
 	
 	# Database settings
+	database_provider: str = "sqlite"  # "sqlite" or "dynamodb"
 	database_path: str = "github_events.db"
 	database_url: Optional[str] = None
+	
+	# DynamoDB specific settings
+	aws_region: str = "us-east-1"
+	dynamodb_table_prefix: str = "github-events-"
+	dynamodb_endpoint_url: Optional[str] = None  # For local DynamoDB
+	aws_access_key_id: Optional[str] = None
+	aws_secret_access_key: Optional[str] = None
 	
 	# GitHub API settings
 	github_token: Optional[str] = None
@@ -59,8 +67,14 @@ class Config:
 			target_repositories = ["sparesparrow/mcp-prompts"]
 		
 		return cls(
+			database_provider=os.getenv("DATABASE_PROVIDER", cls.database_provider),
 			database_path=os.getenv("DATABASE_PATH", cls.database_path),
 			database_url=os.getenv("DATABASE_URL"),
+			aws_region=os.getenv("AWS_REGION", cls.aws_region),
+			dynamodb_table_prefix=os.getenv("DYNAMODB_TABLE_PREFIX", cls.dynamodb_table_prefix),
+			dynamodb_endpoint_url=os.getenv("DYNAMODB_ENDPOINT_URL"),
+			aws_access_key_id=os.getenv("AWS_ACCESS_KEY_ID"),
+			aws_secret_access_key=os.getenv("AWS_SECRET_ACCESS_KEY"),
 			github_token=os.getenv("GITHUB_TOKEN"),
 			github_api_base=os.getenv("GITHUB_API_BASE", cls.github_api_base),
 			user_agent=os.getenv("USER_AGENT", cls.user_agent),
@@ -88,6 +102,33 @@ class Config:
 		if self.database_url:
 			return self.database_url
 		return f"sqlite:///{self.get_database_path()}"
+	
+	def get_database_config(self) -> Dict[str, Any]:
+		"""Get database configuration for factory"""
+		if self.database_provider.lower() == "dynamodb":
+			config = {
+				'provider': 'dynamodb',
+				'region': self.aws_region,
+				'table_prefix': self.dynamodb_table_prefix,
+			}
+			
+			if self.dynamodb_endpoint_url:
+				config['endpoint_url'] = self.dynamodb_endpoint_url
+			
+			if self.aws_access_key_id:
+				config['aws_access_key_id'] = self.aws_access_key_id
+			
+			if self.aws_secret_access_key:
+				config['aws_secret_access_key'] = self.aws_secret_access_key
+			
+			return config
+		else:
+			# Default to SQLite
+			return {
+				'provider': 'sqlite',
+				'db_path': self.get_database_path(),
+				'schema_path': 'database/schema.sql'
+			}
 
 
 # Global configuration instance
