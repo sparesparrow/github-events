@@ -1,6 +1,8 @@
 from __future__ import annotations
 import os
 import aiosqlite
+from contextlib import asynccontextmanager
+from typing import AsyncIterator
 
 
 class DBConnection:
@@ -27,5 +29,7 @@ class DBConnection:
             await db.execute("CREATE INDEX IF NOT EXISTS idx_events_repo ON events(repo_name)")
             await db.commit()
 
-    async def connect(self) -> aiosqlite.Connection:
-        return await aiosqlite.connect(self.db_path)
+    @asynccontextmanager
+    async def connect(self) -> AsyncIterator[aiosqlite.Connection]:
+        async with aiosqlite.connect(self.db_path) as conn:
+            yield conn

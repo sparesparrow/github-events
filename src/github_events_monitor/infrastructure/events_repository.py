@@ -11,7 +11,7 @@ class EventsRepository(EventReaderProtocol):
         self.db = db
 
     async def count_events_by_type(self, since_ts: int, repo: Optional[str] = None) -> Dict[str, int]:
-        async with await self.db.connect() as conn:
+        async with self.db.connect() as conn:
             if repo:
                 q = "SELECT event_type, COUNT(*) FROM events WHERE created_at_ts >= ? AND repo_name = ? GROUP BY event_type"
                 args = (since_ts, repo)
@@ -24,7 +24,7 @@ class EventsRepository(EventReaderProtocol):
 
     async def pr_timestamps(self, repo: str) -> List[int]:
         # Focus on PR opened events
-        async with await self.db.connect() as conn:
+        async with self.db.connect() as conn:
             q = """
             SELECT created_at_ts
             FROM events
@@ -39,7 +39,7 @@ class EventsRepository(EventReaderProtocol):
         return await self.count_events_by_type(since_ts=since_ts, repo=repo)
 
     async def trending_since(self, since_ts: int, limit: int = 10) -> List[Dict[str, Any]]:
-        async with await self.db.connect() as conn:
+        async with self.db.connect() as conn:
             q = """
             SELECT repo_name, COUNT(*) AS c
             FROM events
@@ -58,7 +58,7 @@ class EventsRepository(EventReaderProtocol):
         bucket_sec = max(bucket_minutes, 1) * 60
         buckets = list(range(since_ts, now_ts + 1, bucket_sec))
         res: List[Dict[str, Any]] = []
-        async with await self.db.connect() as conn:
+        async with self.db.connect() as conn:
             for i in range(len(buckets) - 1):
                 start = buckets[i]
                 end = buckets[i + 1]
@@ -88,7 +88,7 @@ class EventsRepository(EventReaderProtocol):
     # ------------------------------
 
     async def _count_event_type(self, since_ts: int, event_type: str, repo: Optional[str] = None, action: Optional[str] = None) -> int:
-        async with await self.db.connect() as conn:
+        async with self.db.connect() as conn:
             if repo:
                 if action is not None:
                     q = """
@@ -122,7 +122,7 @@ class EventsRepository(EventReaderProtocol):
         return int(row[0]) if row else 0
 
     async def _sum_json_int(self, since_ts: int, event_type: str, json_path: str, repo: Optional[str] = None) -> int:
-        async with await self.db.connect() as conn:
+        async with self.db.connect() as conn:
             if repo:
                 q = """
                 SELECT COALESCE(SUM(CAST(json_extract(payload, ?) AS INTEGER)), 0)
@@ -157,7 +157,7 @@ class EventsRepository(EventReaderProtocol):
 
     async def pr_merge_time_seconds(self, repo: str, since_ts: int) -> List[int]:
         # Compute per-PR merge durations for PRs opened since since_ts
-        async with await self.db.connect() as conn:
+        async with self.db.connect() as conn:
             q = """
             WITH opens AS (
                 SELECT CAST(json_extract(payload, '$.pull_request.number') AS INTEGER) AS pr_num,
@@ -188,7 +188,7 @@ class EventsRepository(EventReaderProtocol):
         return [int(r[0]) for r in rows if r and r[0] is not None and int(r[0]) >= 0]
 
     async def issue_first_response_seconds(self, repo: str, since_ts: int) -> List[int]:
-        async with await self.db.connect() as conn:
+        async with self.db.connect() as conn:
             q = """
             WITH openings AS (
                 SELECT CAST(json_extract(payload, '$.issue.number') AS INTEGER) AS issue_num,

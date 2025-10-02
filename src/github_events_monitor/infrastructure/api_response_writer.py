@@ -16,7 +16,7 @@ class ApiResponseWriter(EventWriterProtocol):
         to_insert = list(events)
         if not to_insert:
             return 0
-        async with await self.db.connect() as conn:
+        async with self.db.connect() as conn:
             await conn.executemany(
                 """
                 INSERT OR IGNORE INTO events (id, event_type, repo_name, actor_login, created_at, created_at_ts, payload)

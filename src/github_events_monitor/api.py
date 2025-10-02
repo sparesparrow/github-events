@@ -1,5 +1,6 @@
 from __future__ import annotations
 import os
+from contextlib import asynccontextmanager
 from fastapi import FastAPI
 
 from src.github_events_monitor.infrastructure.db_connection import DBConnection
@@ -10,8 +11,6 @@ from src.github_events_monitor.application.github_events_command_service import 
 from src.github_events_monitor.application.github_events_query_service import GitHubEventsQueryService
 from src.github_events_monitor.interfaces.api import endpoints
 
-app = FastAPI(title="GitHub Events Monitor API", version="1.0.0")
-
 # Singletons
 _db = DBConnection(os.getenv("DATABASE_PATH", "./github_events.db"))
 _reader = ApiRequestReader()
@@ -21,22 +20,28 @@ _command_service = GitHubEventsCommandService(reader=_reader, writer=_writer)
 _query_service = GitHubEventsQueryService(repository=_repo)
 
 
-@app.on_event("startup")
-async def _startup() -> None:
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """
+    Application lifespan manager for startup/shutdown events.
+    Replaces deprecated @app.on_event decorators.
+    """
+    # Startup
     await _db.initialize()
+    yield
+    # Shutdown (currently no cleanup needed)
 
 
-# Wire dependencies by overriding accessors
-def _get_qs() -> GitHubEventsQueryService:
-    return _query_service
+app = FastAPI(
+    title="GitHub Events Monitor API",
+    version="1.2.3",
+    description="Monitor GitHub events with comprehensive analytics and metrics",
+    lifespan=lifespan
+)
 
-
-def _get_cs() -> GitHubEventsCommandService:
-    return _command_service
-
-
-endpoints.get_query_service = _get_qs  # type: ignore
-endpoints.get_command_service = _get_cs  # type: ignore
+# Wire dependencies by setting the singleton instances
+endpoints._query_service_instance = _query_service  # type: ignore
+endpoints._command_service_instance = _command_service  # type: ignore
 
 # Include routes
 app.include_router(endpoints.router)
