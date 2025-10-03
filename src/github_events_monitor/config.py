@@ -54,6 +54,11 @@ class Config:
 	enable_caching: bool = True
 	cache_ttl_seconds: int = 300
 	
+	# Repository comparison and monitoring settings
+	primary_repositories: List[str] = None
+	comparison_repositories: List[str] = None
+	monitoring_focus_areas: List[str] = None
+	
 	@classmethod
 	def from_env(cls) -> 'Config':
 		"""Create configuration from environment variables"""
@@ -63,8 +68,35 @@ class Config:
 		if target_repos_env:
 			target_repositories = [repo.strip() for repo in target_repos_env.split(",") if repo.strip()]
 		else:
-			# Default target repositories if none specified
-			target_repositories = ["sparesparrow/mcp-prompts"]
+			# Default target repositories if none specified - now includes OpenSSL monitoring
+			target_repositories = ["openssl/openssl", "sparesparrow/github-events"]
+		
+		# Parse primary and comparison repositories
+		primary_repos_env = os.getenv("PRIMARY_REPOSITORIES")
+		primary_repositories = None
+		if primary_repos_env:
+			primary_repositories = [repo.strip() for repo in primary_repos_env.split(",") if repo.strip()]
+		else:
+			primary_repositories = ["openssl/openssl"]
+		
+		comparison_repos_env = os.getenv("COMPARISON_REPOSITORIES")  
+		comparison_repositories = None
+		if comparison_repos_env:
+			comparison_repositories = [repo.strip() for repo in comparison_repos_env.split(",") if repo.strip()]
+		else:
+			comparison_repositories = ["sparesparrow/github-events"]
+		
+		# Parse monitoring focus areas
+		focus_areas_env = os.getenv("MONITORING_FOCUS_AREAS")
+		monitoring_focus_areas = None
+		if focus_areas_env:
+			monitoring_focus_areas = [area.strip() for area in focus_areas_env.split(",") if area.strip()]
+		else:
+			monitoring_focus_areas = [
+				"workflow_runs", "deployment_frequency", "test_success_rates", 
+				"security_scanning", "code_quality_checks", "release_automation",
+				"commit_frequency", "pr_merge_time", "issue_resolution_time"
+			]
 		
 		return cls(
 			database_provider=os.getenv("DATABASE_PROVIDER", cls.database_provider),
@@ -88,7 +120,10 @@ class Config:
 			log_level=os.getenv("LOG_LEVEL", cls.log_level),
 			log_file=os.getenv("LOG_FILE"),
 			enable_caching=os.getenv("ENABLE_CACHING", "true").lower() == "true",
-			cache_ttl_seconds=int(os.getenv("CACHE_TTL", cls.cache_ttl_seconds))
+			cache_ttl_seconds=int(os.getenv("CACHE_TTL", cls.cache_ttl_seconds)),
+			primary_repositories=primary_repositories,
+			comparison_repositories=comparison_repositories,
+			monitoring_focus_areas=monitoring_focus_areas
 		)
 	
 	def get_database_path(self) -> str:

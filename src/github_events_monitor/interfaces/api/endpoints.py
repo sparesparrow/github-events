@@ -5,6 +5,12 @@ from datetime import datetime, timezone
 
 from src.github_events_monitor.application.github_events_query_service import GitHubEventsQueryService
 from src.github_events_monitor.application.github_events_command_service import GitHubEventsCommandService
+from .repository_comparison_endpoints import (
+    RepositoryComparisonEndpoint,
+    RepositoryMetricsEndpoint,
+    ComparisonDashboardEndpoint,
+    CIAutomationAnalysisEndpoint
+)
 
 router = APIRouter()
 
@@ -438,3 +444,50 @@ async def monitoring_high_impact_commits(
         "min_impact_score": min_impact_score,
         "high_impact_commits": commits
     }
+
+
+# ------------------------------
+# Repository Comparison Endpoints
+# ------------------------------
+
+# Initialize comparison endpoints
+_repo_comparison_endpoint = RepositoryComparisonEndpoint()
+_repo_metrics_endpoint = RepositoryMetricsEndpoint()
+_comparison_dashboard_endpoint = ComparisonDashboardEndpoint()
+_ci_automation_endpoint = CIAutomationAnalysisEndpoint()
+
+
+@router.get("/comparison/repositories")
+async def compare_repositories(
+    primary_repo: str = Query(..., description="Primary repository to compare (e.g., 'openssl/openssl')"),
+    comparison_repo: str = Query(..., description="Repository to compare against (e.g., 'sparesparrow/github-events')"),
+    hours: int = Query(168, description="Time window in hours for comparison (default: 168 = 1 week)")
+) -> dict:
+    """Compare two repositories from CI automation perspective"""
+    return await _repo_comparison_endpoint.compare_repositories(primary_repo, comparison_repo, hours)
+
+
+@router.get("/metrics/repository-detailed")
+async def get_repository_metrics(
+    repo: str = Query(..., description="Repository name (e.g., 'openssl/openssl')"),
+    hours: int = Query(168, description="Time window in hours (default: 168 = 1 week)")
+) -> dict:
+    """Get comprehensive metrics for a single repository"""
+    return await _repo_metrics_endpoint.get_repository_metrics(repo, hours)
+
+
+@router.get("/dashboard/comparison")
+async def get_comparison_dashboard(
+    hours: int = Query(168, description="Time window in hours (default: 168 = 1 week)")
+) -> dict:
+    """Get comprehensive dashboard data for configured repository comparisons"""
+    return await _comparison_dashboard_endpoint.get_dashboard_data(hours)
+
+
+@router.get("/analysis/ci-automation")
+async def analyze_ci_automation(
+    repo: str = Query(..., description="Repository name (e.g., 'openssl/openssl')"),
+    hours: int = Query(168, description="Time window in hours (default: 168 = 1 week)")
+) -> dict:
+    """Analyze CI automation practices for a repository"""
+    return await _ci_automation_endpoint.analyze_ci_automation(repo, hours)
