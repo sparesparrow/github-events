@@ -4,7 +4,7 @@ Repository Comparison API Endpoints
 Provides REST API endpoints for repository comparison and CI automation monitoring.
 """
 
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, List
 from fastapi import HTTPException, Query
 from datetime import datetime
 import logging
@@ -224,7 +224,7 @@ class CIAutomationAnalysisEndpoint:
         else:
             return "Minimal"
     
-    def _get_ci_recommendations(self, metrics, score: float) -> List[str]:
+    def _get_ci_recommendations(self, metrics, score: float) -> list[str]:
         """Get CI-specific recommendations"""
         recommendations = []
         
