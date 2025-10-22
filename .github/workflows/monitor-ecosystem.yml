@@ -1,0 +1,222 @@
+name: Ecosystem Monitor
+
+on:
+  schedule:
+    # Run every 4 hours
+    - cron: '0 */4 * * *'
+  workflow_dispatch:
+    inputs:
+      domains:
+        description: 'Comma-separated list of domains to monitor'
+        required: false
+        default: 'openssl-tools,openssl-conan-base,openssl-fips-policy,mcp-project-orchestrator'
+      force_run:
+        description: 'Force run even if recent data exists'
+        required: false
+        default: false
+        type: boolean
+  repository_dispatch:
+    types: [ecosystem-alert, domain-failure, workflow-complete]
+
+jobs:
+  monitor:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    outputs:
+      analysis_summary: ${{ steps.analyze.outputs.summary }}
+      report_artifacts: ${{ steps.analyze.outputs.artifacts }}
+      alert_level: ${{ steps.analyze.outputs.alert_level }}
+    
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install -e .
+
+      - name: Set up environment
+        run: |
+          mkdir -p reports
+          mkdir -p logs
+          echo "GITHUB_TOKEN=${{ secrets.GITHUB_TOKEN }}" >> $GITHUB_ENV
+          echo "DB_PATH=database/events.db" >> $GITHUB_ENV
+
+      - name: Initialize database
+        run: |
+          python -c "
+          import sqlite3
+          import os
+          os.makedirs('database', exist_ok=True)
+          with sqlite3.connect('database/events.db') as conn, open('database/schema.sql', 'r') as f:
+              conn.executescript(f.read())
+          print('Database initialized')
+          "
+
+      - name: Run ecosystem monitoring
+        id: monitor
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          DOMAINS: ${{ github.event.inputs.domains || 'openssl-tools,openssl-conan-base,openssl-fips-policy,mcp-project-orchestrator' }}
+          FORCE_RUN: ${{ github.event.inputs.force_run || 'false' }}
+        run: |
+          python scripts/ecosystem_monitor.py \
+            --domains "$DOMAINS" \
+            --output-dir reports \
+            --log-dir logs \
+            --force-run="$FORCE_RUN" \
+            --github-token "$GITHUB_TOKEN"
+
+      - name: Analyze results
+        id: analyze
+        run: |
+          # Analyze the monitoring results and determine alert level
+          if [ -f "reports/ecosystem_analysis.json" ]; then
+            # Extract key metrics from the analysis
+            TOTAL_ISSUES=$(jq -r '.total_issues // 0' reports/ecosystem_analysis.json)
+            CRITICAL_ISSUES=$(jq -r '.critical_issues // 0' reports/ecosystem_analysis.json)
+            FAILED_DOMAINS=$(jq -r '.failed_domains | length' reports/ecosystem_analysis.json)
+            
+            # Determine alert level
+            if [ "$CRITICAL_ISSUES" -gt 0 ]; then
+              ALERT_LEVEL="critical"
+            elif [ "$FAILED_DOMAINS" -gt 0 ]; then
+              ALERT_LEVEL="warning"
+            elif [ "$TOTAL_ISSUES" -gt 0 ]; then
+              ALERT_LEVEL="info"
+            else
+              ALERT_LEVEL="success"
+            fi
+            
+            # Create summary
+            echo "## Ecosystem Monitoring Summary" > summary.md
+            echo "**Alert Level:** $ALERT_LEVEL" >> summary.md
+            echo "**Total Issues:** $TOTAL_ISSUES" >> summary.md
+            echo "**Critical Issues:** $CRITICAL_ISSUES" >> summary.md
+            echo "**Failed Domains:** $FAILED_DOMAINS" >> summary.md
+            echo "" >> summary.md
+            echo "**Generated:** $(date -u)" >> summary.md
+            
+            # Set outputs
+            echo "summary<<EOF" >> $GITHUB_OUTPUT
+            cat summary.md >> $GITHUB_OUTPUT
+            echo "EOF" >> $GITHUB_OUTPUT
+            echo "artifacts=reports/" >> $GITHUB_OUTPUT
+            echo "alert_level=$ALERT_LEVEL" >> $GITHUB_OUTPUT
+          else
+            echo "summary=No analysis file found" >> $GITHUB_OUTPUT
+            echo "artifacts=" >> $GITHUB_OUTPUT
+            echo "alert_level=error" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Upload reports
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: ecosystem-reports-${{ github.run_number }}
+          path: reports/
+          retention-days: 30
+
+      - name: Upload logs
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: ecosystem-logs-${{ github.run_number }}
+          path: logs/
+          retention-days: 7
+
+      - name: Create GitHub Pages content
+        run: |
+          mkdir -p pages_content
+          if [ -f "reports/ecosystem_analysis.json" ]; then
+            cp reports/ecosystem_analysis.json pages_content/
+            cp reports/ecosystem_summary.md pages_content/ || echo "No summary markdown found"
+          fi
+          echo "Ecosystem monitoring reports published to pages_content/"
+
+      - name: Upload to Pages
+        uses: actions/upload-pages-artifact@v3
+        if: always()
+        with:
+          path: pages_content
+
+  alert:
+    runs-on: ubuntu-latest
+    needs: monitor
+    if: needs.monitor.outputs.alert_level == 'critical' || needs.monitor.outputs.alert_level == 'warning'
+    
+    steps:
+      - name: Create ecosystem alert issue
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const summary = `${{ needs.monitor.outputs.analysis_summary }}`;
+            const alertLevel = `${{ needs.monitor.outputs.alert_level }}`;
+            const artifacts = `${{ needs.monitor.outputs.report_artifacts }}`;
+            
+            const title = `🚨 Ecosystem Alert - ${alertLevel.toUpperCase()}`;
+            const body = `${summary}\n\n**Report Artifacts:** ${artifacts}\n\n**Workflow Run:** ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}`;
+            
+            const issue = await github.rest.issues.create({
+              owner: 'sparesparrow',
+              repo: 'github-events',
+              title: title,
+              body: body,
+              labels: ['ecosystem-monitor', `alert-${alertLevel}`]
+            });
+            
+            console.log(`Created issue #${issue.data.number}: ${title}`);
+
+  cross-domain-cooperation:
+    runs-on: ubuntu-latest
+    needs: monitor
+    if: always()
+    
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Trigger domain-specific workflows
+        if: needs.monitor.outputs.alert_level == 'critical' || needs.monitor.outputs.alert_level == 'warning'
+        run: |
+          # Trigger repository_dispatch events for domain-specific workflows
+          echo "Triggering cross-domain cooperation workflows..."
+          
+          # Example: Trigger workflow in other repositories
+          # This would require appropriate permissions and repository access
+          echo "Cross-domain cooperation triggered for alert level: ${{ needs.monitor.outputs.alert_level }}"
+
+      - name: Publish monitoring data
+        if: always()
+        run: |
+          # Publish aggregated metrics to Cloudsmith or other monitoring systems
+          echo "Publishing monitoring data to external systems..."
+          echo "Alert level: ${{ needs.monitor.outputs.alert_level }}"
+          echo "Artifacts: ${{ needs.monitor.outputs.report_artifacts }}"
+
+  deploy-pages:
+    runs-on: ubuntu-latest
+    needs: monitor
+    if: always()
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4

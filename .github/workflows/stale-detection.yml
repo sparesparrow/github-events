@@ -1,0 +1,161 @@
+name: Stale Detection and Alerting
+
+on:
+  schedule:
+    # Run daily at 6 AM UTC
+    - cron: '0 6 * * *'
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Dry run mode (no actual changes)'
+        required: false
+        default: false
+        type: boolean
+      days_until_stale:
+        description: 'Days until PR/branch is considered stale'
+        required: false
+        default: 30
+        type: number
+      days_until_close:
+        description: 'Days until stale PR/branch is closed'
+        required: false
+        default: 7
+        type: number
+
+jobs:
+  stale-detection:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    outputs:
+      stale_prs: ${{ steps.detect.outputs.stale_prs }}
+      stale_branches: ${{ steps.detect.outputs.stale_branches }}
+      alerts_created: ${{ steps.alerts.outputs.alerts_created }}
+    
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install PyGithub python-dateutil
+
+      - name: Detect stale PRs and branches
+        id: detect
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          DRY_RUN: ${{ github.event.inputs.dry_run || 'false' }}
+          DAYS_UNTIL_STALE: ${{ github.event.inputs.days_until_stale || 30 }}
+          DAYS_UNTIL_CLOSE: ${{ github.event.inputs.days_until_close || 7 }}
+        run: |
+          python scripts/stale_detector.py \
+            --token "$GITHUB_TOKEN" \
+            --days-stale "$DAYS_UNTIL_STALE" \
+            --days-close "$DAYS_UNTIL_CLOSE" \
+            --dry-run="$DRY_RUN" \
+            --output stale_analysis.json
+
+      - name: Create alerts and notifications
+        id: alerts
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          DRY_RUN: ${{ github.event.inputs.dry_run || 'false' }}
+        run: |
+          python scripts/alert_manager.py \
+            --token "$GITHUB_TOKEN" \
+            --input stale_analysis.json \
+            --dry-run="$DRY_RUN"
+
+      - name: Upload stale analysis
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: stale-analysis-${{ github.run_number }}
+          path: stale_analysis.json
+          retention-days: 30
+
+  cross-repo-stale-check:
+    runs-on: ubuntu-latest
+    needs: stale-detection
+    if: needs.stale-detection.outputs.stale_prs != '[]' || needs.stale-detection.outputs.stale_branches != '[]'
+    
+    strategy:
+      matrix:
+        repo: 
+          - 'openssl-tools'
+          - 'openssl-conan-base' 
+          - 'openssl-fips-policy'
+          - 'mcp-project-orchestrator'
+    
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Check stale items in ${{ matrix.repo }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TARGET_REPO: sparesparrow/${{ matrix.repo }}
+        run: |
+          echo "Checking stale items in $TARGET_REPO..."
+          # This would trigger repository_dispatch events to check other repos
+          # For now, just log the action
+          echo "Would check stale items in $TARGET_REPO"
+
+  notification:
+    runs-on: ubuntu-latest
+    needs: [stale-detection, cross-repo-stale-check]
+    if: always()
+    
+    steps:
+      - name: Create notification issue
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const stalePrs = JSON.parse(`${{ needs.stale-detection.outputs.stale_prs }}`);
+            const staleBranches = JSON.parse(`${{ needs.stale-detection.outputs.stale_branches }}`);
+            const alertsCreated = `${{ needs.stale-detection.outputs.alerts_created }}`;
+            
+            if (stalePrs.length === 0 && staleBranches.length === 0) {
+              console.log('No stale items found');
+              return;
+            }
+            
+            const title = `🧹 Stale Detection Report - ${new Date().toISOString().split('T')[0]}`;
+            let body = `## Stale Detection Summary\n\n`;
+            body += `**Generated:** ${new Date().toISOString()}\n\n`;
+            
+            if (stalePrs.length > 0) {
+              body += `### Stale Pull Requests (${stalePrs.length})\n`;
+              stalePrs.forEach(pr => {
+                body += `- [${pr.title}](${pr.url}) - Last updated: ${pr.updated_at}\n`;
+              });
+              body += '\n';
+            }
+            
+            if (staleBranches.length > 0) {
+              body += `### Stale Branches (${staleBranches.length})\n`;
+              staleBranches.forEach(branch => {
+                body += `- \`${branch.name}\` - Last commit: ${branch.last_commit}\n`;
+              });
+              body += '\n';
+            }
+            
+            body += `**Alerts Created:** ${alertsCreated}\n\n`;
+            body += `**Workflow Run:** ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}`;
+            
+            const issue = await github.rest.issues.create({
+              owner: 'sparesparrow',
+              repo: 'github-events',
+              title: title,
+              body: body,
+              labels: ['stale-detection', 'automated', 'maintenance']
+            });
+            
+            console.log(`Created notification issue #${issue.data.number}`);
