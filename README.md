@@ -25,6 +25,12 @@ graph LR
 - **REST API**: 15+ endpoints for metrics, analytics, and monitoring
 - **Data Exporter**: Builds docs/data.json and interactive visualizations
 - **GitHub Pages**: Static dashboard with live API integration
+- **🆕 Ecosystem Monitoring System**: Multi-domain monitoring with cross-domain cooperation
+  - Scheduled aggregation every 4 hours across multiple domains
+  - Advanced failure analysis with domain-specific pattern detection
+  - Automated stale detection and cleanup for PRs and branches
+  - Cross-domain cooperation via repository dispatch and workflow dispatch
+  - Comprehensive alerting and notification system
 
 ## Configuration
 
@@ -342,7 +348,72 @@ curl -X POST "http://localhost:8000/webhook" \
   }'
 ```
 
-### ☁️ AWS Integration
+### 🌐 Ecosystem Monitoring System
+
+### Multi-Domain Monitoring
+
+The system now includes comprehensive ecosystem monitoring capabilities for managing multiple GitHub domains:
+
+**Key Features**:
+- **Scheduled Monitoring**: Every 4 hours, monitors multiple domains for events and failures
+- **Failure Analysis**: Advanced log analysis with domain-specific pattern detection (Conan, FIPS, workflow errors)
+- **Stale Detection**: Automated detection and management of stale PRs and branches
+- **Cross-Domain Cooperation**: Repository dispatch events, workflow dispatch, and artifact sharing
+- **Alerting**: Automated issue creation and notifications with configurable thresholds
+
+**Monitored Domains**:
+- `openssl-tools`
+- `openssl-conan-base`
+- `openssl-fips-policy`
+- `mcp-project-orchestrator`
+
+**Workflows**:
+- **Ecosystem Monitor**: `.github/workflows/monitor-ecosystem.yml` - Main monitoring workflow
+- **Stale Detection**: `.github/workflows/stale-detection.yml` - Automated stale item management
+
+**Scripts**:
+- **Ecosystem Monitor**: `scripts/ecosystem_monitor.py` - Multi-domain event collection and analysis
+- **Enhanced Fixer**: `scripts/fixer.py` - Log analysis and workflow fix suggestions
+- **Stale Detector**: `scripts/stale_detector.py` - Stale PR and branch detection
+- **Alert Manager**: `scripts/alert_manager.py` - Alert creation and cross-domain notifications
+
+### Quick Start - Ecosystem Monitoring
+
+```bash
+# Run ecosystem monitoring manually
+gh workflow run monitor-ecosystem.yml \
+  -f domains="openssl-tools,openssl-conan-base" \
+  -f force_run=true
+
+# Check for stale items
+gh workflow run stale-detection.yml \
+  -f dry_run=true \
+  -f days_until_stale=30
+
+# Analyze logs and generate fixes
+python scripts/fixer.py \
+  --log-files "build.log" "test.log" \
+  --cooperation \
+  --target-repos "sparesparrow/github-events"
+```
+
+### Alert Thresholds
+
+- **Health Score**: 80+ (Healthy), 60-79 (Warning), 0-59 (Critical)
+- **Stale Threshold**: 30 days without activity
+- **Cleanup Threshold**: 7 days after stale detection
+- **Activity Threshold**: Events in last 4 hours
+
+### Cross-Domain Cooperation
+
+- **Repository Dispatch**: Trigger workflows in other repositories
+- **Workflow Dispatch**: Manual orchestration across domains
+- **Artifact Sharing**: Cloudsmith integration with OIDC authentication
+- **Issue Creation**: Automated alerts and notifications
+
+For detailed documentation, see **[docs/ECOSYSTEM_MONITORING.md](docs/ECOSYSTEM_MONITORING.md)**.
+
+## ☁️ AWS Integration
 
 #### S3 Static Website Deployment
 
