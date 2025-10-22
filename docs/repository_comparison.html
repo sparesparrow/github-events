@@ -1,0 +1,344 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width,initial-scale=1">
+    <title>Repository Comparison Dashboard — CI Automation Analysis</title>
+    <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
+    <style>
+        body{font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;margin:24px;background:#0f172a;color:#e2e8f0}
+        a{color:#60a5fa} .wrap{max-width:1400px;margin:0 auto}
+        .card{background:#111827;border:1px solid #1f2937;border-radius:10px;padding:18px;margin-bottom:18px}
+        .grid{display:grid;grid-template-columns:1fr;gap:18px}
+        .grid-2{display:grid;grid-template-columns:1fr 1fr;gap:18px}
+        @media(min-width:960px){.grid{grid-template-columns:1fr 1fr}}
+        .pill{display:inline-block;background:#0b1220;border:1px solid #1f2937;border-radius:8px;padding:8px 10px;margin:0 10px 10px 0}
+        .chart{height:420px}
+        .small-chart{height:300px}
+        pre{background:#0b1220;border:1px solid #1f2937;border-radius:8px;padding:12px;overflow:auto;font-size:12px}
+        .error{color:#f87171;background:#fee2e2;padding:10px;border-radius:5px;margin:10px 0}
+        .success{color:#10b981;background:#d1fae5;padding:10px;border-radius:5px;margin:10px 0}
+        .warning{color:#f59e0b;background:#fef3c7;padding:10px;border-radius:5px;margin:10px 0}
+        .metric-card{background:#1f2937;border-radius:8px;padding:16px;text-align:center}
+        .metric-value{font-size:2em;font-weight:bold;color:#60a5fa}
+        .metric-label{font-size:0.9em;color:#9ca3af;margin-top:4px}
+        .comparison-section{border-left:4px solid #60a5fa;padding-left:16px;margin:16px 0}
+        .repo-header{font-size:1.2em;font-weight:bold;color:#f3f4f6;margin-bottom:8px}
+        .recommendations{background:#1f2937;border-radius:8px;padding:16px}
+        .recommendation{margin:8px 0;padding:8px;background:#374151;border-radius:4px}
+    </style>
+</head>
+<body>
+<div class="wrap">
+    <div class="card">
+        <h1>🔍 Repository Comparison Dashboard</h1>
+        <p>Comprehensive CI automation analysis comparing OpenSSL and your monitoring project</p>
+        <div>
+            <span class="pill">Status: <span id="status">Loading…</span></span>
+            <span class="pill">Updated: <span id="updated">–</span></span>
+            <span class="pill">Time Window: <span id="timeWindow">168 hours</span></span>
+        </div>
+    </div>
+
+    <!-- Repository Overview -->
+    <div class="grid-2">
+        <div class="card">
+            <h2>🏢 Primary Repository</h2>
+            <div id="primaryRepo" class="comparison-section">
+                <div class="repo-header">Loading...</div>
+                <div id="primaryMetrics"></div>
+            </div>
+        </div>
+        <div class="card">
+            <h2>🔄 Comparison Repository</h2>
+            <div id="comparisonRepo" class="comparison-section">
+                <div class="repo-header">Loading...</div>
+                <div id="comparisonMetrics"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Key Metrics Comparison -->
+    <div class="card">
+        <h2>📊 Key Metrics Comparison</h2>
+        <div class="grid" id="metricsGrid">
+            <!-- Metrics will be populated here -->
+        </div>
+    </div>
+
+    <!-- CI Automation Analysis -->
+    <div class="grid-2">
+        <div class="card">
+            <h2>🤖 Automation Maturity</h2>
+            <div id="automationChart" class="small-chart"></div>
+        </div>
+        <div class="card">
+            <h2>⚡ Workflow Performance</h2>
+            <div id="performanceChart" class="small-chart"></div>
+        </div>
+    </div>
+
+    <!-- Detailed Analysis -->
+    <div class="card">
+        <h2>🔬 CI Automation Analysis</h2>
+        <div class="grid-2">
+            <div>
+                <h3>Workflow Patterns</h3>
+                <div id="workflowAnalysis"></div>
+            </div>
+            <div>
+                <h3>Deployment Practices</h3>
+                <div id="deploymentAnalysis"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Recommendations -->
+    <div class="card">
+        <h2>💡 Recommendations</h2>
+        <div id="recommendations" class="recommendations">
+            Loading recommendations...
+        </div>
+    </div>
+
+    <!-- Activity Timeline -->
+    <div class="card">
+        <h2>📈 Activity Comparison Timeline</h2>
+        <div id="timelineChart" class="chart"></div>
+    </div>
+
+    <!-- Debug Console -->
+    <div class="card">
+        <h3>🐛 Debug Console</h3>
+        <pre id="debugBox">Loading...</pre>
+    </div>
+    
+    <div id="errorBox"></div>
+</div>
+
+<script>
+const API_BASE = 'http://localhost:8000';
+const TIME_WINDOW = 168; // 1 week
+
+async function fetchData(endpoint) {
+    try {
+        console.log(`Fetching ${endpoint}...`);
+        const response = await fetch(`${API_BASE}${endpoint}`, {cache: 'no-store'});
+        if (!response.ok) {
+            throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+        }
+        const data = await response.json();
+        console.log(`✅ Loaded ${endpoint}:`, data);
+        return data;
+    } catch (e) {
+        console.error(`❌ Failed to load ${endpoint}:`, e);
+        return {error: String(e)};
+    }
+}
+
+function showError(msg) {
+    const errorBox = document.getElementById('errorBox');
+    errorBox.innerHTML = `<div class="error">⚠️ ${msg}</div>`;
+}
+
+function showSuccess(msg) {
+    const errorBox = document.getElementById('errorBox');
+    errorBox.innerHTML = `<div class="success">✅ ${msg}</div>`;
+}
+
+function createMetricCard(label, value, unit = '') {
+    return `
+        <div class="metric-card">
+            <div class="metric-value">${value}${unit}</div>
+            <div class="metric-label">${label}</div>
+        </div>
+    `;
+}
+
+function formatNumber(num) {
+    if (num === null || num === undefined) return 'N/A';
+    if (typeof num === 'number') {
+        if (num >= 1000) return (num / 1000).toFixed(1) + 'k';
+        return num.toString();
+    }
+    return num;
+}
+
+function formatPercentage(num) {
+    if (num === null || num === undefined) return 'N/A';
+    return num.toFixed(1) + '%';
+}
+
+function formatHours(hours) {
+    if (hours === null || hours === undefined) return 'N/A';
+    if (hours < 1) return (hours * 60).toFixed(0) + 'm';
+    if (hours < 24) return hours.toFixed(1) + 'h';
+    return (hours / 24).toFixed(1) + 'd';
+}
+
+async function loadDashboard() {
+    try {
+        // Load comparison data
+        const comparisonData = await fetchData(`/comparison/repositories?primary_repo=openssl/openssl&comparison_repo=sparesparrow/github-events&hours=${TIME_WINDOW}`);
+        
+        if (comparisonData.error) {
+            showError(`Failed to load comparison data: ${comparisonData.error}`);
+            return;
+        }
+
+        // Update status
+        document.getElementById('status').textContent = 'Loaded';
+        document.getElementById('updated').textContent = new Date().toLocaleString();
+        document.getElementById('timeWindow').textContent = `${TIME_WINDOW} hours`;
+
+        // Update repository info
+        const primaryMetrics = comparisonData.metrics.primary;
+        const comparisonMetrics = comparisonData.metrics.comparison;
+
+        document.querySelector('#primaryRepo .repo-header').textContent = primaryMetrics.repo_name;
+        document.querySelector('#comparisonRepo .repo-header').textContent = comparisonMetrics.repo_name;
+
+        // Create metrics cards
+        const metricsGrid = document.getElementById('metricsGrid');
+        metricsGrid.innerHTML = `
+            ${createMetricCard('Total Events', formatNumber(primaryMetrics.total_events))}
+            ${createMetricCard('Total Events', formatNumber(comparisonMetrics.total_events))}
+            ${createMetricCard('Workflow Runs', formatNumber(primaryMetrics.workflow_runs))}
+            ${createMetricCard('Workflow Runs', formatNumber(comparisonMetrics.workflow_runs))}
+            ${createMetricCard('Deployments', formatNumber(primaryMetrics.deployments))}
+            ${createMetricCard('Deployments', formatNumber(comparisonMetrics.deployments))}
+            ${createMetricCard('Success Rate', formatPercentage(primaryMetrics.workflow_success_rate))}
+            ${createMetricCard('Success Rate', formatPercentage(comparisonMetrics.workflow_success_rate))}
+        `;
+
+        // Create automation maturity chart
+        const automationData = [
+            {
+                x: [primaryMetrics.repo_name, comparisonMetrics.repo_name],
+                y: [
+                    calculateAutomationScore(primaryMetrics),
+                    calculateAutomationScore(comparisonMetrics)
+                ],
+                type: 'bar',
+                marker: {color: ['#60a5fa', '#10b981']}
+            }
+        ];
+
+        Plotly.newPlot('automationChart', automationData, {
+            paper_bgcolor: '#111827',
+            plot_bgcolor: '#111827',
+            font: {color: '#e2e8f0'},
+            margin: {t: 10, l: 40, r: 10, b: 80},
+            xaxis: {tickangle: -30},
+            yaxis: {title: 'Automation Score', range: [0, 100]}
+        }, {displayModeBar: false, responsive: true});
+
+        // Create performance comparison chart
+        const performanceData = [
+            {
+                x: ['Workflow Runs', 'Deployments', 'Security Events', 'Releases'],
+                y: [primaryMetrics.workflow_runs, primaryMetrics.deployments, primaryMetrics.security_events, primaryMetrics.releases],
+                name: primaryMetrics.repo_name,
+                type: 'bar',
+                marker: {color: '#60a5fa'}
+            },
+            {
+                x: ['Workflow Runs', 'Deployments', 'Security Events', 'Releases'],
+                y: [comparisonMetrics.workflow_runs, comparisonMetrics.deployments, comparisonMetrics.security_events, comparisonMetrics.releases],
+                name: comparisonMetrics.repo_name,
+                type: 'bar',
+                marker: {color: '#10b981'}
+            }
+        ];
+
+        Plotly.newPlot('performanceChart', performanceData, {
+            paper_bgcolor: '#111827',
+            plot_bgcolor: '#111827',
+            font: {color: '#e2e8f0'},
+            margin: {t: 10, l: 40, r: 10, b: 80},
+            barmode: 'group',
+            xaxis: {tickangle: -30},
+            yaxis: {title: 'Count'}
+        }, {displayModeBar: false, responsive: true});
+
+        // Update analysis sections
+        const analysis = comparisonData.analysis;
+        document.getElementById('workflowAnalysis').innerHTML = `
+            <p><strong>Primary Workflow Frequency:</strong> ${(analysis.workflow_patterns.primary_workflow_frequency * 100).toFixed(1)}%</p>
+            <p><strong>Comparison Workflow Frequency:</strong> ${(analysis.workflow_patterns.comparison_workflow_frequency * 100).toFixed(1)}%</p>
+        `;
+
+        document.getElementById('deploymentAnalysis').innerHTML = `
+            <p><strong>Primary Deployment Frequency:</strong> ${(analysis.workflow_patterns.primary_deployment_frequency * 100).toFixed(1)}%</p>
+            <p><strong>Comparison Deployment Frequency:</strong> ${(analysis.workflow_patterns.comparison_deployment_frequency * 100).toFixed(1)}%</p>
+        `;
+
+        // Update recommendations
+        const recommendationsDiv = document.getElementById('recommendations');
+        recommendationsDiv.innerHTML = comparisonData.recommendations.map(rec => 
+            `<div class="recommendation">💡 ${rec}</div>`
+        ).join('');
+
+        // Create timeline chart (mock data for now)
+        const timelineData = [
+            {
+                x: ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'],
+                y: [12, 15, 18, 14, 20, 8, 6],
+                name: primaryMetrics.repo_name,
+                type: 'scatter',
+                mode: 'lines+markers',
+                line: {color: '#60a5fa'}
+            },
+            {
+                x: ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'],
+                y: [5, 8, 6, 9, 12, 4, 3],
+                name: comparisonMetrics.repo_name,
+                type: 'scatter',
+                mode: 'lines+markers',
+                line: {color: '#10b981'}
+            }
+        ];
+
+        Plotly.newPlot('timelineChart', timelineData, {
+            paper_bgcolor: '#111827',
+            plot_bgcolor: '#111827',
+            font: {color: '#e2e8f0'},
+            margin: {t: 10, l: 40, r: 10, b: 40},
+            xaxis: {title: 'Day of Week'},
+            yaxis: {title: 'Activity Level'}
+        }, {displayModeBar: false, responsive: true});
+
+        // Update debug console
+        document.getElementById('debugBox').textContent = JSON.stringify({
+            comparison: comparisonData.comparison,
+            analysis_summary: analysis.automation_maturity,
+            recommendations_count: comparisonData.recommendations.length
+        }, null, 2);
+
+        showSuccess('Repository comparison dashboard loaded successfully');
+
+    } catch (error) {
+        console.error('Dashboard loading error:', error);
+        showError(`Dashboard loading failed: ${error.message}`);
+        document.getElementById('debugBox').textContent = `Error: ${error.message}`;
+    }
+}
+
+function calculateAutomationScore(metrics) {
+    let score = 0;
+    if (metrics.workflow_runs > 0) score += 30;
+    if (metrics.deployments > 0) score += 25;
+    if (metrics.workflow_success_rate) score += (metrics.workflow_success_rate / 100) * 20;
+    if (metrics.security_events > 0) score += 15;
+    if (metrics.releases > 0) score += 10;
+    return Math.min(score, 100);
+}
+
+// Load dashboard on page load
+document.addEventListener('DOMContentLoaded', loadDashboard);
+
+// Auto-refresh every 5 minutes
+setInterval(loadDashboard, 5 * 60 * 1000);
+</script>
+</body>
+</html>

@@ -1,0 +1,336 @@
+name: Repository Comparison Monitoring
+
+on:
+  schedule:
+    # Run every 6 hours to monitor both repositories
+    - cron: '0 */6 * * *'
+  workflow_dispatch:
+    inputs:
+      primary_repo:
+        description: 'Primary repository to monitor'
+        required: false
+        default: 'openssl/openssl'
+      comparison_repo:
+        description: 'Comparison repository'
+        required: false
+        default: 'sparesparrow/github-events'
+      time_window_hours:
+        description: 'Time window in hours for analysis'
+        required: false
+        default: '168'
+
+permissions:
+  contents: write
+  pages: write
+  id-token: write
+
+jobs:
+  monitor-and-compare:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install -e .
+
+      - name: Initialize database
+        run: |
+          mkdir -p database
+          if [ -f database/schema.sql ]; then
+            sqlite3 database/events.db < database/schema.sql
+          fi
+
+      - name: Set monitoring configuration
+        env:
+          PRIMARY_REPO: ${{ github.event.inputs.primary_repo || 'openssl/openssl' }}
+          COMPARISON_REPO: ${{ github.event.inputs.comparison_repo || 'sparesparrow/github-events' }}
+        run: |
+          echo "TARGET_REPOSITORIES=$PRIMARY_REPO,$COMPARISON_REPO" >> $GITHUB_ENV
+          echo "PRIMARY_REPOSITORIES=$PRIMARY_REPO" >> $GITHUB_ENV
+          echo "COMPARISON_REPOSITORIES=$COMPARISON_REPO" >> $GITHUB_ENV
+          echo "TIME_WINDOW=${{ github.event.inputs.time_window_hours || '168' }}" >> $GITHUB_ENV
+
+      - name: Collect events for both repositories
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          DATABASE_PATH: database/events.db
+        run: |
+          python -c "
+          import asyncio
+          import os
+          from src.github_events_monitor.event_collector import GitHubEventsCollector
+          
+          async def main():
+              db_path = os.getenv('DATABASE_PATH', 'database/events.db')
+              token = os.getenv('GITHUB_TOKEN')
+              collector = GitHubEventsCollector(db_path, token)
+              
+              await collector.initialize_database()
+              
+              # Collect events for both repositories
+              repos = os.getenv('TARGET_REPOSITORIES', '').split(',')
+              total_collected = 0
+              
+              for repo in repos:
+                  if repo.strip():
+                      print(f'Collecting events for {repo.strip()}...')
+                      try:
+                          n = await collector.collect_repository_events(repo.strip(), limit=100)
+                          total_collected += n
+                          print(f'Collected {n} events for {repo.strip()}')
+                      except Exception as e:
+                          print(f'Error collecting events for {repo.strip()}: {e}')
+              
+              print(f'Total events collected: {total_collected}')
+          
+          asyncio.run(main())
+          "
+
+      - name: Start API server for data generation
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          DATABASE_PATH: database/events.db
+          API_HOST: 0.0.0.0
+          API_PORT: 8000
+        run: |
+          python -m src.github_events_monitor.api > api.log 2>&1 &
+          echo $! > api.pid
+          
+          # Wait for API to be ready
+          for i in {1..30}; do
+            if curl -fsS http://localhost:8000/health >/dev/null 2>&1; then
+              echo "API is ready"
+              break
+            fi
+            echo "Waiting for API... ($i/30)"
+            sleep 2
+          done
+
+      - name: Generate comparison report
+        env:
+          PRIMARY_REPO: ${{ github.event.inputs.primary_repo || 'openssl/openssl' }}
+          COMPARISON_REPO: ${{ github.event.inputs.comparison_repo || 'sparesparrow/github-events' }}
+          TIME_WINDOW: ${{ github.event.inputs.time_window_hours || '168' }}
+        run: |
+          python -c "
+          import json
+          import requests
+          import os
+          from datetime import datetime
+          
+          primary_repo = os.getenv('PRIMARY_REPO')
+          comparison_repo = os.getenv('COMPARISON_REPO')
+          time_window = os.getenv('TIME_WINDOW')
+          
+          base_url = 'http://localhost:8000'
+          
+          try:
+              # Get comparison data
+              comparison_url = f'{base_url}/comparison/repositories'
+              params = {
+                  'primary_repo': primary_repo,
+                  'comparison_repo': comparison_repo,
+                  'hours': int(time_window)
+              }
+              
+              print(f'Fetching comparison data from {comparison_url}')
+              response = requests.get(comparison_url, params=params, timeout=30)
+              
+              if response.status_code == 200:
+                  comparison_data = response.json()
+                  
+                  # Save comparison report
+                  os.makedirs('reports', exist_ok=True)
+                  timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+                  report_file = f'reports/comparison_report_{timestamp}.json'
+                  
+                  with open(report_file, 'w') as f:
+                      json.dump(comparison_data, f, indent=2)
+                  
+                  print(f'Comparison report saved to {report_file}')
+                  
+                  # Generate summary
+                  summary = {
+                      'timestamp': datetime.now().isoformat(),
+                      'primary_repo': primary_repo,
+                      'comparison_repo': comparison_repo,
+                      'time_window_hours': int(time_window),
+                      'primary_metrics': {
+                          'total_events': comparison_data['metrics']['primary']['total_events'],
+                          'workflow_runs': comparison_data['metrics']['primary']['workflow_runs'],
+                          'deployments': comparison_data['metrics']['primary']['deployments'],
+                          'success_rate': comparison_data['metrics']['primary']['workflow_success_rate']
+                      },
+                      'comparison_metrics': {
+                          'total_events': comparison_data['metrics']['comparison']['total_events'],
+                          'workflow_runs': comparison_data['metrics']['comparison']['workflow_runs'],
+                          'deployments': comparison_data['metrics']['comparison']['deployments'],
+                          'success_rate': comparison_data['metrics']['comparison']['workflow_success_rate']
+                      },
+                      'recommendations': comparison_data['recommendations']
+                  }
+                  
+                  with open('reports/latest_summary.json', 'w') as f:
+                      json.dump(summary, f, indent=2)
+                  
+                  print('Summary saved to reports/latest_summary.json')
+                  
+                  # Print key findings
+                  print('\\n=== COMPARISON SUMMARY ===')
+                  print(f'Primary Repository: {primary_repo}')
+                  print(f'  - Total Events: {summary[\"primary_metrics\"][\"total_events\"]}')
+                  print(f'  - Workflow Runs: {summary[\"primary_metrics\"][\"workflow_runs\"]}')
+                  print(f'  - Deployments: {summary[\"primary_metrics\"][\"deployments\"]}')
+                  print(f'  - Success Rate: {summary[\"primary_metrics\"][\"success_rate\"]}%')
+                  
+                  print(f'\\nComparison Repository: {comparison_repo}')
+                  print(f'  - Total Events: {summary[\"comparison_metrics\"][\"total_events\"]}')
+                  print(f'  - Workflow Runs: {summary[\"comparison_metrics\"][\"workflow_runs\"]}')
+                  print(f'  - Deployments: {summary[\"comparison_metrics\"][\"deployments\"]}')
+                  print(f'  - Success Rate: {summary[\"comparison_metrics\"][\"success_rate\"]}%')
+                  
+                  print('\\n=== RECOMMENDATIONS ===')
+                  for i, rec in enumerate(summary['recommendations'], 1):
+                      print(f'{i}. {rec}')
+                  
+              else:
+                  print(f'Failed to get comparison data: {response.status_code} - {response.text}')
+                  exit(1)
+                  
+          except Exception as e:
+              print(f'Error generating comparison report: {e}')
+              exit(1)
+          "
+
+      - name: Update comparison dashboard data
+        run: |
+          # Copy the latest comparison data for the dashboard
+          if [ -f reports/latest_summary.json ]; then
+            cp reports/latest_summary.json docs/comparison_data.json
+            echo "Dashboard data updated"
+          fi
+
+      - name: Stop API server
+        if: always()
+        run: |
+          if [ -f api.pid ]; then
+            kill $(cat api.pid) 2>/dev/null || true
+            rm -f api.pid
+          fi
+
+      - name: Upload comparison reports
+        uses: actions/upload-artifact@v4
+        with:
+          name: comparison-reports-${{ github.run_id }}
+          path: |
+            reports/
+            api.log
+          retention-days: 30
+
+      - name: Commit updated dashboard data
+        if: success()
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          
+          if [ -f docs/comparison_data.json ]; then
+            git add docs/comparison_data.json
+            git add reports/ || true
+            
+            if ! git diff --staged --quiet; then
+              git commit -m "chore: update repository comparison data [$(date +'%Y-%m-%d %H:%M:%S')]"
+              git push
+              echo "Comparison data committed and pushed"
+            else
+              echo "No changes to commit"
+            fi
+          fi
+
+  generate-comparison-summary:
+    needs: monitor-and-compare
+    runs-on: ubuntu-latest
+    if: always()
+    
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        
+      - name: Download comparison reports
+        uses: actions/download-artifact@v4
+        with:
+          name: comparison-reports-${{ github.run_id }}
+          path: reports/
+
+      - name: Generate markdown summary
+        run: |
+          if [ -f reports/latest_summary.json ]; then
+            python -c "
+            import json
+            import os
+            from datetime import datetime
+            
+            with open('reports/latest_summary.json', 'r') as f:
+                data = json.load(f)
+            
+            markdown = f'''# Repository Comparison Report
+            
+            **Generated:** {data['timestamp']}  
+            **Time Window:** {data['time_window_hours']} hours  
+            
+            ## Repositories Compared
+            
+            - **Primary:** {data['primary_repo']}
+            - **Comparison:** {data['comparison_repo']}
+            
+            ## Key Metrics
+            
+            | Metric | {data['primary_repo']} | {data['comparison_repo']} |
+            |--------|---------|------------|
+            | Total Events | {data['primary_metrics']['total_events']} | {data['comparison_metrics']['total_events']} |
+            | Workflow Runs | {data['primary_metrics']['workflow_runs']} | {data['comparison_metrics']['workflow_runs']} |
+            | Deployments | {data['primary_metrics']['deployments']} | {data['comparison_metrics']['deployments']} |
+            | Success Rate | {data['primary_metrics']['success_rate']}% | {data['comparison_metrics']['success_rate']}% |
+            
+            ## Recommendations
+            
+            '''
+            
+            for i, rec in enumerate(data['recommendations'], 1):
+                markdown += f'{i}. {rec}\\n'
+            
+            markdown += f'''
+            
+            ## Dashboard
+            
+            View the interactive comparison dashboard at: [Repository Comparison Dashboard](https://sparesparrow.github.io/github-events/repository_comparison.html)
+            
+            ---
+            *This report was automatically generated by the Repository Comparison Monitoring workflow.*
+            '''
+            
+            with open('COMPARISON_REPORT.md', 'w') as f:
+                f.write(markdown)
+            
+            print('Markdown summary generated: COMPARISON_REPORT.md')
+            "
+          else
+            echo 'No summary data found'
+          fi
+
+      - name: Upload summary
+        uses: actions/upload-artifact@v4
+        with:
+          name: comparison-summary-${{ github.run_id }}
+          path: COMPARISON_REPORT.md
