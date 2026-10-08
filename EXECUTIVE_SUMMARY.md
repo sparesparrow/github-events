@@ -225,5 +225,5 @@ The application can be deployed immediately with confidence. All core functional
 
 **Prepared by**: Cursor AI Agent  
 **Project**: GitHub Events Monitor  
-**Repository**: github-events-clone  
+**Repository**: github-events  
 **Documentation**: See `/workspace/docs/` for detailed guides

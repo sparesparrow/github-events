@@ -12,8 +12,8 @@
 #### Option 1: pip (Recommended)
 ```bash
 # Clone the repository
-git clone https://github.com/sparesparrow/github-events-clone.git
-cd github-events-clone
+git clone https://github.com/sparesparrow/github-events.git
+cd github-events
 
 # Install dependencies
 pip install -r requirements.txt
