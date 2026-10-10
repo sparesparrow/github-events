@@ -115,8 +115,8 @@ python -m src.github_events_monitor.enhanced_api
 #### Method 1: pip install (Recommended)
 ```bash
 # Clone repository
-git clone https://github.com/sparesparrow/github-events-clone.git
-cd github-events-clone
+git clone https://github.com/sparesparrow/github-events.git
+cd github-events
 
 # Install with pip
 pip install -e .
@@ -219,7 +219,7 @@ DATABASE_PATH=./custom.db python scripts/mcp_server.py
       "args": [
         "scripts/mcp_server.py"
       ],
-      "cwd": "/path/to/github-events-clone",
+      "cwd": "/path/to/github-events",
       "env": {
         "DATABASE_PATH": "./github_events.db",
         "GITHUB_TOKEN": "your_token_here"
@@ -238,7 +238,7 @@ DATABASE_PATH=./custom.db python scripts/mcp_server.py
       "args": [
         "-m", "src.github_events_monitor.mcp_server"
       ],
-      "cwd": "/path/to/github-events-clone",
+      "cwd": "/path/to/github-events",
       "env": {
         "DATABASE_PATH": "./github_events.db"
       }
@@ -466,8 +466,8 @@ yum install -y python3 python3-pip git
 
 # Clone and setup
 cd /opt
-git clone https://github.com/sparesparrow/github-events-clone.git
-cd github-events-clone
+git clone https://github.com/sparesparrow/github-events.git
+cd github-events
 pip3 install -r requirements.txt
 
 # Create systemd service
@@ -479,7 +479,7 @@ After=network.target
 [Service]
 Type=simple
 User=ec2-user
-WorkingDirectory=/opt/github-events-clone
+WorkingDirectory=/opt/github-events
 Environment=GITHUB_TOKEN=your_token_here
 Environment=API_HOST=0.0.0.0
 Environment=API_PORT=8000
@@ -1506,7 +1506,7 @@ Notes:
 ## Project Structure
 
 ```
-github-events-clone/
+github-events/
 ├── src/                    # Source code
 ├── tests/                  # Test suite
 ├── docs/                   # Documentation
